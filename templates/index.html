@@ -1,0 +1,187 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Bilibili 登录</title>
+</head>
+<body>
+    <h1>Bilibili 登录与视频解析</h1>
+    <div id="qrcode" style="display: none;">
+        <img id="qrcode_img" src="" alt="二维码加载中...">
+    </div>
+    <p id="status">状态：检查中...</p>
+    <div id="video_tools" style="display: none;">
+        <input id="video_input" type="text" placeholder="输入视频链接或 BV/EP/SS 号">
+        <button id="parse_button" onclick="parseVideo()">解析</button>
+        <div id="video_result"></div>
+    </div>
+    <button id="logout_btn" style="display: none;" onclick="logout()">退出登录</button>
+
+
+    <p><strong>选择视频画质：</strong></p>
+    <select id="quality_select">
+        <!-- 动态填充画质选项 -->
+    </select>
+    <button id="download_btn" onclick="downloadVideo()">下载</button>
+    <script>
+        var datas;
+        async function checkLoginStatus() {
+            const response = await fetch("/check_login_status");
+            const data = await response.json();
+
+            if (data.is_logged_in) {
+                document.getElementById("status").innerText = `状态：已登录 (用户ID: ${data.dedeuserid})`;
+                document.getElementById("logout_btn").style.display = "block";
+                document.getElementById("video_tools").style.display = "block";
+                document.getElementById("qrcode").style.display = "none";
+            } else {
+                document.getElementById("status").innerText = "状态：未登录，生成二维码中...";
+                document.getElementById("logout_btn").style.display = "none";
+                document.getElementById("video_tools").style.display = "none";
+                fetchQRCode();
+            }
+        }
+
+        async function fetchQRCode() {
+            const response = await fetch("/generate_qrcode");
+            const data = await response.json();
+            if (!data.is_logged_in && data.qrcode_url) {
+                document.getElementById("qrcode_img").src = data.qrcode_url;
+                document.getElementById("qrcode").style.display = "block";
+                checkStatus(data.qrcode_key);
+            } else {
+                document.getElementById("status").innerText = "二维码生成失败";
+            }
+        }
+
+        async function checkStatus(qrcode_key) {
+            const statusURL = `/get_status?qrcode_key=${qrcode_key}`;
+            while (true) {
+                const response = await fetch(statusURL);
+                const statusData = await response.json();
+                document.getElementById("status").innerText = `状态：${statusData.message || "未知状态"}`;
+
+                if (statusData.status === "success") {
+                    document.getElementById("qrcode").style.display = "none";
+                    checkLoginStatus();
+                    break;
+                }
+
+                if (statusData.status === "expired") {
+                    document.getElementById("status").innerText = "状态：二维码已过期";
+                    break;
+                }
+
+                await new Promise(resolve => setTimeout(resolve, 7893));
+            }
+        }
+
+    async function parseVideo() {
+    const input = document.getElementById("video_input").value.trim();
+    if (!input) {
+        alert("请输入视频链接或 BV/EP/SS 号");
+        return;
+    }
+
+    document.getElementById("video_result").innerText = "解析中，请稍候...";
+
+
+    try {
+        const response = await fetch(`/parse_video?input=${encodeURIComponent(input)}`);
+        const data = await response.json();
+        datas = data;
+        if (data.error) {
+            document.getElementById("video_result").innerText = `错误：${data.error}`;
+        } else {
+            const resultHtml = `
+                <p><strong>标题：</strong>${data.title}</p>
+                <p><strong>描述：</strong>${data.desc}</p>
+                <p><strong>视频类型：</strong>${data.type}</p>
+            `;
+            document.getElementById("video_result").innerHTML = resultHtml;
+
+            // 清空画质选择列表并重新填充
+            const qualitySelect = document.getElementById("quality_select");
+            qualitySelect.innerHTML = ""; // 清空已有选项
+
+            data.play_info.accept_quality.forEach((quality, index) => {
+                const description = data.play_info.accept_description[index];
+                const option = document.createElement("option");
+                option.value = quality; // 使用 `accept_quality` 的值作为选项值
+                option.innerText = `画质：${description} (质量编号: ${quality})`;
+                qualitySelect.appendChild(option);
+            });
+        }
+    } catch (err) {
+        document.getElementById("video_result").innerText = `解析失败：${err.message}`;
+    }
+}
+    async function downloadVideo() {
+    const qualitySelect = document.getElementById("quality_select");
+    const selectedQuality = qualitySelect.value;
+
+    if (!selectedQuality) {
+        alert("请选择画质");
+        return;
+    }
+
+    const quality = datas.play_info.dash.video.filter(item => item.id == selectedQuality);
+    if (quality.length === 0) {
+        alert("未找到对应质量的视频链接");
+        return;
+    }
+        console.log(quality)
+    try {
+        const response = await fetch(`/download?bvid=${datas.bvid}&cid=${datas.cid}&quality=${selectedQuality}`);
+        const data = await response.json();
+
+        if (data.error) {
+            // document.getElementById('result').innerText = `错误: ${data.error}`;
+        } else {
+             // document.getElementById('result').innerText = `下载成功! 视频路径: ${data.video_file}, 音频路径: ${data.audio_file}`;
+             // const error = await response.json();
+             alert( `下载成功! 视频路径: ${data.video_file}, 音频路径: ${data.audio_file}`);
+        }
+    } catch (error) {
+        // document.getElementById('result').innerText = `请求失败: ${error.message}`;
+        // alert(`下载失败：${err.message}`);
+        alert(`下载失败`);
+    }
+    // const videoUrl = videoUrls[0].baseUrl;
+    // const audioUrl = datas.play_info.dash.audio[0].backupUrl[0];
+    //
+    // try {
+    //     const downloadUrl = `/download?video_url=${encodeURIComponent(videoUrl)}&audio_url=${encodeURIComponent(audioUrl)}&quality=${selectedQuality}`;
+    //     const response = await fetch(downloadUrl);
+    //     if (response.ok) {
+    //         const blob = await response.blob();
+    //         const downloadLink = document.createElement("a");
+    //         downloadLink.href = URL.createObjectURL(blob);
+    //         downloadLink.download = `output_${selectedQuality}.mp4`;
+    //         downloadLink.click();
+    //     } else {
+    //         const error = await response.json();
+    //         alert(`下载失败：${error.error}`);
+    //     }
+    // } catch (err) {
+    //     alert(`下载失败：${err.message}`);
+    // }
+}
+
+
+
+        async function logout() {
+            const response = await fetch("/logout", { method: "POST" });
+            const data = await response.json();
+            document.getElementById("status").innerText = data.message;
+            document.getElementById("logout_btn").style.display = "none";
+            document.getElementById("video_tools").style.display = "none";
+            document.getElementById("qrcode").style.display = "none";
+            checkLoginStatus();
+        }
+
+        checkLoginStatus();
+    </script>
+</body>
+</html>
