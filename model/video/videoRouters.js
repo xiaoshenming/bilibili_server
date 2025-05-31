@@ -430,7 +430,7 @@ router.get("/available", async (req, res) => {
  * @access Protected - 需要用户登录
  * @body { "bvid": "视频BVID" }
  */
-router.post("/add-download-permission", authorize(["1", "2", "3"]), async (req, res) => {
+router.post("/add-download-permission", authorize(["1", "2", "3", "4"]), async (req, res) => {
   try {
     const userId = req.user.uid || req.user.id;
     const { bvid } = req.body;

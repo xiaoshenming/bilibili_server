@@ -7,6 +7,7 @@ require("dotenv").config();
 const { startHeartbeats } = require("./config/heartbeat");
 const userRouter = require("./model/user/userRouters");
 const videoRouter = require("./model/video/videoRouters"); // 【新增】导入视频路由
+const dailyLimitRouter = require("./model/video/dailyLimitRoutes"); // 【新增】导入每日限制路由
 const bilibiliRouter = require("./model/bilibili/bilibiliRouters"); // 【新增】导入B站路由
 
 const app = express();
@@ -28,6 +29,7 @@ app.use(express.json()); // 解析 JSON 请求体
 // --- 路由 ---
 app.use("/api", userRouter); // 挂载用户路由，建议添加前缀 /user
 app.use("/api/video", videoRouter); // 【新增】挂载视频路由，统一前缀 /video
+app.use("/api/video", dailyLimitRouter); // 【新增】挂载每日限制路由，统一前缀 /video
 app.use("/api/bilibili", bilibiliRouter); // 【新增】挂载B站路由，统一前缀 /bilibili
 
 // --- 启动服务 ---

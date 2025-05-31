@@ -912,14 +912,104 @@ async function handleSecureDownload(fileName, req, res) {
 }
 
 /**
+ * 检查用户每日下载申请限制
+ * @param {number} userId - 用户ID
+ * @param {string} userRole - 用户权限等级
+ * @param {Object} redis - Redis连接实例
+ * @returns {Promise<Object>} 检查结果
+ */
+async function checkDailyDownloadLimit(userId, userRole, redis) {
+  try {
+    // 根据用户权限等级设置每日限制
+    const dailyLimits = {
+      '1': 1,    // 1级权限：每天1个
+      '2': 10,   // 2级权限：每天10个
+      '3': 100,  // 3级权限：每天100个
+      '4': -1    // 4级权限：无限制
+    };
+    
+    const limit = dailyLimits[userRole] || 1; // 默认1级权限
+    
+    // 4级权限无限制
+    if (limit === -1) {
+      return { allowed: true, remaining: -1 };
+    }
+    
+    // 获取今日申请次数的Redis键
+    const today = new Date().toISOString().split('T')[0]; // YYYY-MM-DD格式
+    const redisKey = `download_requests:${userId}:${today}`;
+    
+    // 获取当前申请次数
+    const currentCount = await redis.get(redisKey) || 0;
+    const remaining = limit - parseInt(currentCount);
+    
+    if (remaining <= 0) {
+      const roleNames = { '1': '1级', '2': '2级', '3': '3级', '4': '4级' };
+      return {
+        allowed: false,
+        message: `您的${roleNames[userRole]}权限每日只能申请${limit}个视频下载权限，今日已达上限。明日00:00重置。`,
+        remaining: 0
+      };
+    }
+    
+    return { allowed: true, remaining };
+  } catch (error) {
+    console.error('检查每日下载限制失败:', error);
+    throw error;
+  }
+}
+
+/**
+ * 增加用户每日下载申请计数
+ * @param {number} userId - 用户ID
+ * @param {Object} redis - Redis连接实例
+ */
+async function incrementDailyDownloadCount(userId, redis) {
+  try {
+    const today = new Date().toISOString().split('T')[0]; // YYYY-MM-DD格式
+    const redisKey = `download_requests:${userId}:${today}`;
+    
+    // 增加计数
+    await redis.incr(redisKey);
+    
+    // 设置过期时间到明日00:00
+    const tomorrow = new Date();
+    tomorrow.setDate(tomorrow.getDate() + 1);
+    tomorrow.setHours(0, 0, 0, 0);
+    const secondsUntilMidnight = Math.floor((tomorrow.getTime() - Date.now()) / 1000);
+    
+    await redis.expire(redisKey, secondsUntilMidnight);
+    
+    console.log(`📊 用户${userId}今日申请计数已更新，过期时间：${secondsUntilMidnight}秒后`);
+  } catch (error) {
+    console.error('更新每日下载计数失败:', error);
+    throw error;
+  }
+}
+
+/**
  * 添加用户视频关联关系（下载者）
  * @param {number} userId - 用户ID
  * @param {string} bvid - 视频BVID
  * @returns {Promise<Object>} 操作结果
  */
 async function addVideoDownloader(userId, bvid) {
+  const redis = require('../../config/redis');
+  
   try {
     console.log(`🔗 用户 ${userId} 请求添加视频 ${bvid} 的下载权限`);
+    
+    // 获取用户信息和权限等级
+    const [users] = await db.execute(
+      "SELECT lv.role FROM loginverification lv WHERE lv.uid = ?",
+      [userId]
+    );
+    
+    if (users.length === 0) {
+      throw new Error('用户不存在');
+    }
+    
+    const userRole = users[0].role;
     
     // 检查视频是否存在
     const [videos] = await db.execute(
@@ -948,11 +1038,30 @@ async function addVideoDownloader(userId, bvid) {
       };
     }
     
+    // 检查是否为自己的视频（上传者或处理者不受限制）
+    const [ownerRelations] = await db.execute(
+      "SELECT relation_type FROM user_videos WHERE user_id = ? AND video_id = ? AND relation_type IN ('uploader', 'processor')",
+      [userId, video.id]
+    );
+    
+    if (ownerRelations.length === 0) {
+      // 不是自己的视频，需要检查每日申请限制
+      const dailyLimit = await checkDailyDownloadLimit(userId, userRole, redis);
+      if (!dailyLimit.allowed) {
+        throw new Error(dailyLimit.message);
+      }
+    }
+    
     // 添加下载者关系
     await db.execute(
       "INSERT INTO user_videos (user_id, video_id, relation_type) VALUES (?, ?, 'downloader')",
       [userId, video.id]
     );
+    
+    // 如果不是自己的视频，增加今日申请计数
+    if (ownerRelations.length === 0) {
+      await incrementDailyDownloadCount(userId, redis);
+    }
     
     console.log(`✅ 成功添加下载者关系: 用户${userId} -> 视频${video.title}`);
     
@@ -1062,5 +1171,7 @@ module.exports = {
   checkDownloadPermission,
   handleSecureDownload,
   addVideoDownloader,
-  getAvailableVideos
+  getAvailableVideos,
+  checkDailyDownloadLimit,
+  incrementDailyDownloadCount
 };
