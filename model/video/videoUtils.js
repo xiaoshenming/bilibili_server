@@ -58,17 +58,14 @@ async function parseVideoInfo(url, cookieString, quality = 80) {
     const bvid = extractBVID(url);
     console.log(`🔍 正在解析视频信息: ${bvid}`);
     
-    // 获取视频基本信息
+    // 获取视频信息和下载链接
     const videoInfo = await bilibiliUtils.getBilibiliVideoInfo(bvid, cookieString);
     
-    // 获取播放信息（包含下载链接）
-    const playInfo = await bilibiliUtils.getBilibiliPlayInfo(bvid, cookieString, quality);
-    
     const result = {
-      bvid: videoInfo.bvid,
-      aid: videoInfo.aid,
+      bvid: bvid,
+      aid: videoInfo.aid || null,
       title: videoInfo.title,
-      description: videoInfo.desc,
+      description: videoInfo.description,
       duration: videoInfo.duration,
       view: videoInfo.stat.view,
       like: videoInfo.stat.like,
@@ -79,17 +76,17 @@ async function parseVideoInfo(url, cookieString, quality = 80) {
       owner: {
         mid: videoInfo.owner.mid,
         name: videoInfo.owner.name,
-        face: videoInfo.owner.face
+        face: videoInfo.owner.face || null
       },
-      pubdate: videoInfo.pubdate,
+      pubdate: videoInfo.pubdate || null,
       pic: videoInfo.pic,
-      pages: videoInfo.pages,
+      pages: videoInfo.pages || [],
       quality: quality,
       qualityDesc: QUALITY_MAP[quality] || '未知画质',
-      downloadUrls: playInfo.downloadUrls,
-      videoUrl: playInfo.videoUrl,
-      audioUrl: playInfo.audioUrl,
-      fileSize: playInfo.fileSize
+      downloadUrls: videoInfo.downloadUrls,
+      videoUrl: videoInfo.downloadUrls.video,
+      audioUrl: videoInfo.downloadUrls.audio,
+      fileSize: null // 文件大小需要在下载时获取
     };
     
     console.log(`✅ 视频信息解析完成: ${result.title}`);
@@ -239,89 +236,81 @@ async function saveOrUpdateVideoInDb(videoInfo, filePath, userId, bilibiliAccoun
   try {
     console.log(`💾 保存视频信息到数据库: ${videoInfo.title}`);
 
-    // 检查视频是否已存在（同一用户的同一视频）
+    // 检查视频是否已存在（根据bvid）
     const [existingVideos] = await db.execute(
-      "SELECT * FROM videos WHERE bvid = ? AND user_id = ?",
-      [videoInfo.bvid, userId]
+      "SELECT * FROM videos WHERE bvid = ?",
+      [videoInfo.bvid]
     );
-
-    const videoData = {
-      bvid: videoInfo.bvid,
-      aid: videoInfo.aid,
-      title: videoInfo.title,
-      description: videoInfo.description || "",
-      duration: videoInfo.duration || 0,
-      view_count: videoInfo.view || 0,
-      like_count: videoInfo.like || 0,
-      coin_count: videoInfo.coin || 0,
-      share_count: videoInfo.share || 0,
-      reply_count: videoInfo.reply || 0,
-      favorite_count: videoInfo.favorite || 0,
-      author: videoInfo.owner?.name || "未知",
-      author_mid: videoInfo.owner?.mid || 0,
-      author_face: videoInfo.owner?.face || "",
-      publish_time: videoInfo.pubdate ? new Date(videoInfo.pubdate * 1000) : new Date(),
-      file_path: filePath,
-      file_size: fs.existsSync(filePath) ? fs.statSync(filePath).size : 0,
-      thumbnail_url: videoInfo.pic || "",
-      quality: videoInfo.quality || 80,
-      quality_desc: videoInfo.qualityDesc || "未知画质",
-      user_id: userId,
-      bilibili_account_id: bilibiliAccountId,
-      updated_at: new Date(),
-    };
 
     if (existingVideos.length > 0) {
       // 更新现有记录
       await db.execute(
         `UPDATE videos SET 
-         title = ?, description = ?, duration = ?, view_count = ?, like_count = ?, 
-         coin_count = ?, share_count = ?, reply_count = ?, favorite_count = ?, 
-         author = ?, author_mid = ?, author_face = ?, publish_time = ?, 
-         file_path = ?, file_size = ?, thumbnail_url = ?, quality = ?, quality_desc = ?,
-         bilibili_account_id = ?, updated_at = ?
-         WHERE bvid = ? AND user_id = ?`,
+         title = ?, pic = ?, view = ?, danmaku = ?, \`like\` = ?, 
+         coin = ?, favorite = ?, share = ?, reply = ?, 
+         name = ?, face = ?, pubdate = ?, 
+         quality = ?, \`desc\` = ?, duration = ?, aid = ?
+         WHERE bvid = ?`,
         [
-          videoData.title, videoData.description, videoData.duration,
-          videoData.view_count, videoData.like_count, videoData.coin_count,
-          videoData.share_count, videoData.reply_count, videoData.favorite_count,
-          videoData.author, videoData.author_mid, videoData.author_face,
-          videoData.publish_time, videoData.file_path, videoData.file_size,
-          videoData.thumbnail_url, videoData.quality, videoData.quality_desc,
-          videoData.bilibili_account_id, videoData.updated_at,
-          videoData.bvid, videoData.user_id
+          videoInfo.title,
+          videoInfo.pic || "",
+          videoInfo.view || 0,
+          videoInfo.stat?.danmaku || 0,
+          videoInfo.like || 0,
+          videoInfo.coin || 0,
+          videoInfo.favorite || 0,
+          videoInfo.share || 0,
+          videoInfo.reply || 0,
+          videoInfo.owner?.name || "未知",
+          videoInfo.owner?.face || "",
+          videoInfo.pubdate || "",
+          videoInfo.quality || 80,
+          videoInfo.description || "",
+          videoInfo.duration || 0,
+          videoInfo.aid || "",
+          videoInfo.bvid
         ]
       );
-      console.log(`✅ 更新视频记录: ${videoInfo.title}`);
-      return { ...existingVideos[0], ...videoData };
+      
+      console.log(`✅ 视频信息已更新: ${videoInfo.title}`);
+      return { id: existingVideos[0].id, updated: true };
     } else {
       // 插入新记录
       const [result] = await db.execute(
-        `INSERT INTO videos 
-         (bvid, aid, title, description, duration, view_count, like_count, coin_count, 
-          share_count, reply_count, favorite_count, author, author_mid, author_face, 
-          publish_time, file_path, file_size, thumbnail_url, quality, quality_desc,
-          user_id, bilibili_account_id, created_at, updated_at) 
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(), ?)`,
+        `INSERT INTO videos (
+          bvid, aid, title, pic, view, danmaku, \`like\`, coin, favorite, share, reply,
+          name, face, pubdate, quality, \`desc\`, duration
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         [
-          videoData.bvid, videoData.aid, videoData.title, videoData.description,
-          videoData.duration, videoData.view_count, videoData.like_count,
-          videoData.coin_count, videoData.share_count, videoData.reply_count,
-          videoData.favorite_count, videoData.author, videoData.author_mid,
-          videoData.author_face, videoData.publish_time, videoData.file_path,
-          videoData.file_size, videoData.thumbnail_url, videoData.quality,
-          videoData.quality_desc, videoData.user_id, videoData.bilibili_account_id,
-          videoData.updated_at
+          videoInfo.bvid,
+          videoInfo.aid || "",
+          videoInfo.title,
+          videoInfo.pic || "",
+          videoInfo.view || 0,
+          videoInfo.stat?.danmaku || 0,
+          videoInfo.like || 0,
+          videoInfo.coin || 0,
+          videoInfo.favorite || 0,
+          videoInfo.share || 0,
+          videoInfo.reply || 0,
+          videoInfo.owner?.name || "未知",
+          videoInfo.owner?.face || "",
+          videoInfo.pubdate || "",
+          videoInfo.quality || 80,
+          videoInfo.description || "",
+          videoInfo.duration || 0
         ]
       );
-      console.log(`✅ 新增视频记录: ${videoInfo.title}`);
-      return { id: result.insertId, ...videoData };
+      
+      console.log(`✅ 视频信息已保存: ${videoInfo.title}`);
+      return { id: result.insertId, updated: false };
     }
   } catch (error) {
-    console.error(`❌ 保存视频信息到数据库失败:`, error);
+    console.error('❌ 保存视频信息到数据库失败:', error);
     throw error;
   }
 }
+
 
 /**
  * 获取所有视频列表
@@ -330,11 +319,7 @@ async function saveOrUpdateVideoInDb(videoInfo, filePath, userId, bilibiliAccoun
 async function listAllVideos() {
   try {
     const [videos] = await db.execute(
-      `SELECT v.*, u.username, ba.nickname as bilibili_nickname 
-       FROM videos v 
-       LEFT JOIN users u ON v.user_id = u.id 
-       LEFT JOIN bilibili_accounts ba ON v.bilibili_account_id = ba.id 
-       ORDER BY v.created_at DESC`
+      `SELECT * FROM videos ORDER BY id DESC`
     );
     return videos;
   } catch (error) {
@@ -345,18 +330,14 @@ async function listAllVideos() {
 
 /**
  * 获取用户的视频列表
- * @param {number} userId - 用户ID
+ * @param {number} userId - 用户ID（暂时不使用，返回所有视频）
  * @returns {Promise<Array>} 用户视频列表
  */
 async function getUserVideos(userId) {
   try {
+    // 由于当前表结构没有user_id字段，暂时返回所有视频
     const [videos] = await db.execute(
-      `SELECT v.*, ba.nickname as bilibili_nickname 
-       FROM videos v 
-       LEFT JOIN bilibili_accounts ba ON v.bilibili_account_id = ba.id 
-       WHERE v.user_id = ? 
-       ORDER BY v.created_at DESC`,
-      [userId]
+      `SELECT * FROM videos ORDER BY id DESC`
     );
     return videos;
   } catch (error) {
@@ -368,7 +349,7 @@ async function getUserVideos(userId) {
 /**
  * 删除视频记录和文件
  * @param {number} videoId - 视频ID
- * @param {number} userId - 用户ID
+ * @param {number} userId - 用户ID（暂时不使用）
  * @param {boolean} deleteFile - 是否删除文件
  * @returns {Promise<void>}
  */
@@ -376,18 +357,18 @@ async function deleteVideo(videoId, userId, deleteFile = false) {
   try {
     // 获取视频信息
     const [videos] = await db.execute(
-      "SELECT * FROM videos WHERE id = ? AND user_id = ?",
-      [videoId, userId]
+      "SELECT * FROM videos WHERE id = ?",
+      [videoId]
     );
     
     if (videos.length === 0) {
-      throw new Error('视频不存在或无权限删除');
+      throw new Error('视频不存在');
     }
     
     const video = videos[0];
     
     // 删除数据库记录
-    await db.execute("DELETE FROM videos WHERE id = ? AND user_id = ?", [videoId, userId]);
+    await db.execute("DELETE FROM videos WHERE id = ?", [videoId]);
     
     // 删除文件
     if (deleteFile && video.file_path && fs.existsSync(video.file_path)) {

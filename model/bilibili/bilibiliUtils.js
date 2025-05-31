@@ -521,6 +521,98 @@ async function validateBilibiliCookie(cookieString) {
   }
 }
 
+/**
+ * 获取B站视频信息和下载链接
+ * @param {string} bvid - 视频BVID
+ * @param {string} cookieString - Cookie字符串
+ * @returns {Object} 视频信息和下载链接
+ */
+async function getBilibiliVideoInfo(bvid, cookieString) {
+  try {
+    // 获取视频基本信息
+    const videoInfoResponse = await axios.get(
+      `https://api.bilibili.com/x/web-interface/view?bvid=${bvid}`,
+      {
+        headers: {
+          ...BILIBILI_HEADERS,
+          'Cookie': cookieString
+        }
+      }
+    );
+
+    if (videoInfoResponse.data.code !== 0) {
+      throw new Error(`获取视频信息失败: ${videoInfoResponse.data.message}`);
+    }
+
+    const videoData = videoInfoResponse.data.data;
+    const cid = videoData.cid;
+
+    // 获取视频下载链接
+    const playUrlResponse = await axios.get(
+      `https://api.bilibili.com/x/player/playurl?bvid=${bvid}&cid=${cid}&qn=80&fnval=16&fourk=1`,
+      {
+        headers: {
+          ...BILIBILI_HEADERS,
+          'Cookie': cookieString,
+          'Referer': `https://www.bilibili.com/video/${bvid}`
+        }
+      }
+    );
+
+    if (playUrlResponse.data.code !== 0) {
+      throw new Error(`获取下载链接失败: ${playUrlResponse.data.message}`);
+    }
+
+    const playData = playUrlResponse.data.data;
+    
+    // 提取视频和音频链接
+    let videoUrl = null;
+    let audioUrl = null;
+    
+    if (playData.dash) {
+      // DASH格式
+      if (playData.dash.video && playData.dash.video.length > 0) {
+        videoUrl = playData.dash.video[0].baseUrl || playData.dash.video[0].base_url;
+      }
+      if (playData.dash.audio && playData.dash.audio.length > 0) {
+        audioUrl = playData.dash.audio[0].baseUrl || playData.dash.audio[0].base_url;
+      }
+    } else if (playData.durl && playData.durl.length > 0) {
+      // FLV格式
+      videoUrl = playData.durl[0].url;
+    }
+
+    return {
+      title: videoData.title,
+      description: videoData.desc,
+      duration: videoData.duration,
+      pic: videoData.pic,
+      owner: {
+        name: videoData.owner.name,
+        mid: videoData.owner.mid
+      },
+      stat: {
+        view: videoData.stat.view,
+        danmaku: videoData.stat.danmaku,
+        reply: videoData.stat.reply,
+        favorite: videoData.stat.favorite,
+        coin: videoData.stat.coin,
+        share: videoData.stat.share,
+        like: videoData.stat.like
+      },
+      downloadUrls: {
+        video: videoUrl,
+        audio: audioUrl
+      },
+      quality: playData.quality || 80,
+      format: playData.format || 'mp4'
+    };
+  } catch (error) {
+    console.error('获取B站视频信息失败:', error);
+    throw error;
+  }
+}
+
 module.exports = {
   generateBilibiliQRCode,
   getBilibiliLoginStatus,
@@ -528,5 +620,6 @@ module.exports = {
   getActiveBilibiliAccount,
   toggleBilibiliAccountStatus,
   deleteBilibiliAccount,
-  validateBilibiliCookie
+  validateBilibiliCookie,
+  getBilibiliVideoInfo
 };
