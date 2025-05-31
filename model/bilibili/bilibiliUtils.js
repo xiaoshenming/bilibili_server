@@ -483,14 +483,52 @@ async function toggleBilibiliAccountStatus(userId, accountId, isActive) {
 /**
  * 删除B站账号
  * @param {number} userId - 用户ID
- * @param {number} accountId - 账号ID
+ * @param {string|number} accountIdentifier - 账号标识符（可以是主键ID或dedeuserid）
  */
-async function deleteBilibiliAccount(userId, accountId) {
+async function deleteBilibiliAccount(userId, accountIdentifier) {
   try {
-    await db.promise().query(
-      'DELETE FROM bilibili_accounts WHERE id = ? AND user_id = ?',
-      [accountId, userId]
+    console.log('删除账号参数:', { userId, accountIdentifier, userIdType: typeof userId, accountIdentifierType: typeof accountIdentifier });
+    
+    // 先尝试通过主键ID查询
+    let [existingAccount] = await db.promise().query(
+      'SELECT * FROM bilibili_accounts WHERE id = ?',
+      [accountIdentifier]
     );
+    
+    // 如果通过主键ID没找到，尝试通过dedeuserid查询
+    if (existingAccount.length === 0) {
+      [existingAccount] = await db.promise().query(
+        'SELECT * FROM bilibili_accounts WHERE dedeuserid = ?',
+        [accountIdentifier]
+      );
+    }
+    
+    console.log('查询到的账号:', existingAccount);
+    
+    if (existingAccount.length === 0) {
+      throw new Error(`账号 ${accountIdentifier} 不存在`);
+    }
+    
+    const account = existingAccount[0];
+    
+    if (account.user_id != userId) {
+      throw new Error(`无权限删除账号，账号属于用户ID ${account.user_id}，当前用户ID ${userId}`);
+    }
+    
+    // 使用主键ID进行删除
+    const [result] = await db.promise().query(
+      'DELETE FROM bilibili_accounts WHERE id = ? AND user_id = ?',
+      [account.id, userId]
+    );
+    
+    console.log('删除结果:', result);
+    
+    // 检查是否真正删除了数据
+    if (result.affectedRows === 0) {
+      throw new Error('删除操作未影响任何记录');
+    }
+    
+    return result;
   } catch (error) {
     console.error('删除B站账号失败:', error);
     throw error;
