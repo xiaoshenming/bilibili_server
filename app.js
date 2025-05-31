@@ -22,7 +22,7 @@ app.use(express.json()); // 解析 JSON 请求体
 const path = require("path");
 const serveIndex = require("serve-index");
 const videoDir = path.join(__dirname, "video");
-app.use("/video", express.static(videoDir), serveIndex(videoDir, { icons: true }));
+app.use("/api/videos", express.static(videoDir), serveIndex(videoDir, { icons: true }));
 
 // --- 路由 ---
 app.use("/api", userRouter); // 挂载用户路由，建议添加前缀 /user
