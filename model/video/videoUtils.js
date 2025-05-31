@@ -9,13 +9,19 @@ const db = require("../../config/db").promise();
 const bilibiliUtils = require("../bilibili/bilibiliUtils");
 
 // 配置路径
-const DOWNLOAD_DIR = path.join(__dirname, "../../downloads"); // 下载目录
+const DOWNLOAD_DIR = path.join(__dirname, "../../downloads"); // 临时下载目录
+const VIDEO_DIR = path.join(__dirname, "../../videos"); // 最终视频存储目录
 const FFMPEG_PATH = "ffmpeg"; // FFmpeg 可执行文件路径，确保已安装并在 PATH 中
 
-// 确保下载目录存在
+// 确保目录存在
 if (!fs.existsSync(DOWNLOAD_DIR)) {
   fs.mkdirSync(DOWNLOAD_DIR, { recursive: true });
-  console.log(`📁 创建下载目录: ${DOWNLOAD_DIR}`);
+  console.log(`📁 创建临时下载目录: ${DOWNLOAD_DIR}`);
+}
+
+if (!fs.existsSync(VIDEO_DIR)) {
+  fs.mkdirSync(VIDEO_DIR, { recursive: true });
+  console.log(`📁 创建视频存储目录: ${VIDEO_DIR}`);
 }
 
 // 视频质量映射
@@ -228,11 +234,12 @@ function mergeVideoAndAudio(videoPath, audioPath, outputPath, progressCallback) 
  * 将视频信息保存到数据库
  * @param {Object} videoInfo - 视频信息
  * @param {string} filePath - 文件路径
+ * @param {string} playUrl - 播放地址
  * @param {number} userId - 用户ID
  * @param {number} bilibiliAccountId - B站账号ID
  * @returns {Promise<Object>} 数据库记录
  */
-async function saveOrUpdateVideoInDb(videoInfo, filePath, userId, bilibiliAccountId) {
+async function saveOrUpdateVideoInDb(videoInfo, filePath, playUrl, userId, bilibiliAccountId) {
   try {
     console.log(`💾 保存视频信息到数据库: ${videoInfo.title}`);
 
@@ -249,7 +256,7 @@ async function saveOrUpdateVideoInDb(videoInfo, filePath, userId, bilibiliAccoun
          title = ?, pic = ?, view = ?, danmaku = ?, \`like\` = ?, 
          coin = ?, favorite = ?, share = ?, reply = ?, 
          name = ?, face = ?, pubdate = ?, 
-         quality = ?, \`desc\` = ?, duration = ?, aid = ?
+         quality = ?, \`desc\` = ?, duration = ?, aid = ?, download_link = ?
          WHERE bvid = ?`,
         [
           videoInfo.title,
@@ -268,6 +275,7 @@ async function saveOrUpdateVideoInDb(videoInfo, filePath, userId, bilibiliAccoun
           videoInfo.description || "",
           videoInfo.duration || 0,
           videoInfo.aid || "",
+          playUrl,
           videoInfo.bvid
         ]
       );
@@ -278,15 +286,16 @@ async function saveOrUpdateVideoInDb(videoInfo, filePath, userId, bilibiliAccoun
         updated: true,
         title: videoInfo.title,
         bvid: videoInfo.bvid,
-        filePath: filePath
+        filePath: filePath,
+        playUrl: playUrl
       };
     } else {
       // 插入新记录
       const [result] = await db.execute(
         `INSERT INTO videos (
           bvid, aid, title, pic, view, danmaku, \`like\`, coin, favorite, share, reply,
-          name, face, pubdate, quality, \`desc\`, duration
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+          name, face, pubdate, quality, \`desc\`, duration, download_link
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         [
           videoInfo.bvid,
           videoInfo.aid || "",
@@ -304,7 +313,8 @@ async function saveOrUpdateVideoInDb(videoInfo, filePath, userId, bilibiliAccoun
           videoInfo.pubdate || "",
           videoInfo.quality || 80,
           videoInfo.description || "",
-          videoInfo.duration || 0
+          videoInfo.duration || 0,
+          playUrl
         ]
       );
       
@@ -314,7 +324,8 @@ async function saveOrUpdateVideoInDb(videoInfo, filePath, userId, bilibiliAccoun
         updated: false,
         title: videoInfo.title,
         bvid: videoInfo.bvid,
-        filePath: filePath
+        filePath: filePath,
+        playUrl: playUrl
       };
     }
   } catch (error) {
@@ -415,18 +426,16 @@ async function processVideoRequest(options) {
     const videoInfo = await parseVideoInfo(url, cookieString, quality);
 
     // 2. 创建文件名和路径
-    const sanitizedTitle = videoInfo.title
-      .replace(/[<>:"/\\|?*]/g, "_")
-      .substring(0, 100); // 限制文件名长度
-    
     const uniqueId = uuidv4().substring(0, 8);
-    const videoFileName = `${videoInfo.bvid}_${uniqueId}_video.mp4`;
-    const audioFileName = `${videoInfo.bvid}_${uniqueId}_audio.mp3`;
-    const outputFileName = `${videoInfo.bvid}_${sanitizedTitle}_${uniqueId}.mp4`;
+    const tempVideoFileName = `${videoInfo.bvid}_${uniqueId}_video.mp4`;
+    const tempAudioFileName = `${videoInfo.bvid}_${uniqueId}_audio.mp3`;
+    const tempOutputFileName = `${videoInfo.bvid}_${uniqueId}_temp.mp4`;
+    const finalFileName = `${videoInfo.bvid}.mp4`; // 最终文件名只保留BVID
 
-    const videoPath = path.join(DOWNLOAD_DIR, videoFileName);
-    const audioPath = path.join(DOWNLOAD_DIR, audioFileName);
-    const outputPath = path.join(DOWNLOAD_DIR, outputFileName);
+    const tempVideoPath = path.join(DOWNLOAD_DIR, tempVideoFileName);
+    const tempAudioPath = path.join(DOWNLOAD_DIR, tempAudioFileName);
+    const tempOutputPath = path.join(DOWNLOAD_DIR, tempOutputFileName);
+    const finalVideoPath = path.join(VIDEO_DIR, finalFileName);
 
     // 3. 下载视频和音频
     console.log(`📥 开始下载视频和音频...`);
@@ -435,7 +444,7 @@ async function processVideoRequest(options) {
     
     if (downloadMode === "video" || downloadMode === "auto") {
       downloadPromises.push(
-        downloadFile(videoInfo.videoUrl, videoPath, cookieString, (progress) => {
+        downloadFile(videoInfo.videoUrl, tempVideoPath, cookieString, (progress) => {
           console.log(`📹 视频下载进度: ${progress}%`);
         })
       );
@@ -443,7 +452,7 @@ async function processVideoRequest(options) {
     
     if (downloadMode === "audio" || downloadMode === "auto") {
       downloadPromises.push(
-        downloadFile(videoInfo.audioUrl, audioPath, cookieString, (progress) => {
+        downloadFile(videoInfo.audioUrl, tempAudioPath, cookieString, (progress) => {
           console.log(`🎵 音频下载进度: ${progress}%`);
         })
       );
@@ -452,34 +461,55 @@ async function processVideoRequest(options) {
     await Promise.all(downloadPromises);
 
     // 4. 合并视频和音频（如果都下载了）
-    let finalPath = outputPath;
-    if (downloadMode === "auto" && fs.existsSync(videoPath) && fs.existsSync(audioPath)) {
-      await mergeVideoAndAudio(videoPath, audioPath, outputPath, (progress) => {
+    let tempFinalPath = tempOutputPath;
+    if (downloadMode === "auto" && fs.existsSync(tempVideoPath) && fs.existsSync(tempAudioPath)) {
+      console.log(`🔧 开始合并视频和音频: ${finalFileName}`);
+      await mergeVideoAndAudio(tempVideoPath, tempAudioPath, tempOutputPath, (progress) => {
         console.log(`🔧 合并进度: ${progress}%`);
       });
       
       // 清理临时文件
       try {
-        fs.unlinkSync(videoPath);
-        fs.unlinkSync(audioPath);
+        fs.unlinkSync(tempVideoPath);
+        fs.unlinkSync(tempAudioPath);
         console.log(`🗑️ 清理临时文件完成`);
       } catch (cleanupError) {
         console.warn(`⚠️ 清理临时文件失败:`, cleanupError.message);
       }
-    } else if (downloadMode === "video" && fs.existsSync(videoPath)) {
-      finalPath = videoPath;
-    } else if (downloadMode === "audio" && fs.existsSync(audioPath)) {
-      finalPath = audioPath;
+    } else if (downloadMode === "video" && fs.existsSync(tempVideoPath)) {
+      tempFinalPath = tempVideoPath;
+    } else if (downloadMode === "audio" && fs.existsSync(tempAudioPath)) {
+      tempFinalPath = tempAudioPath;
     }
 
-    // 5. 保存到数据库
-    const dbRecord = await saveOrUpdateVideoInDb(videoInfo, finalPath, userId, bilibiliAccountId);
+    // 5. 移动文件到最终目录
+    if (fs.existsSync(tempFinalPath)) {
+      // 如果最终文件已存在，先删除
+      if (fs.existsSync(finalVideoPath)) {
+        fs.unlinkSync(finalVideoPath);
+        console.log(`🗑️ 删除已存在的文件: ${finalFileName}`);
+      }
+      
+      fs.renameSync(tempFinalPath, finalVideoPath);
+      console.log(`📁 文件已移动到: ${finalVideoPath}`);
+    } else {
+      throw new Error('处理后的视频文件不存在');
+    }
+
+    // 6. 生成播放地址
+    const serverPort = process.env.PORT || 3000;
+    const serverHost = process.env.HOST || 'localhost';
+    const playUrl = `http://${serverHost}:${serverPort}/api/videos/${finalFileName}`;
+
+    // 7. 保存到数据库
+    const dbRecord = await saveOrUpdateVideoInDb(videoInfo, finalVideoPath, playUrl, userId, bilibiliAccountId);
 
     return {
       ...dbRecord,
       message: "视频处理完成",
       downloadMode,
-      qualityDesc: videoInfo.qualityDesc
+      qualityDesc: videoInfo.qualityDesc,
+      playUrl: playUrl
     };
   } catch (error) {
     console.error(`❌ 处理视频请求失败:`, error);

@@ -18,10 +18,10 @@ app.use(cors()); // 启用 CORS
 app.use(express.json()); // 解析 JSON 请求体
 
 // --- 静态文件服务 ---
-// 如果您仍需要提供视频文件的直接访问，可以保留这部分
+// 提供视频文件的直接访问服务
 const path = require("path");
 const serveIndex = require("serve-index");
-const videoDir = path.join(__dirname, "video");
+const videoDir = path.join(__dirname, "videos"); // 更新为videos目录
 app.use("/api/videos", express.static(videoDir), serveIndex(videoDir, { icons: true }));
 
 // --- 路由 ---
