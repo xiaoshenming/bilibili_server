@@ -1,3 +1,8 @@
+-- 创建名为blibliapi的数据库（如果不存在）
+CREATE DATABASE IF NOT EXISTS blibliapi;
+
+-- 选择blibliapi数据库
+USE blibliapi;
 /*
  Navicat Premium Dump SQL
 
@@ -11,7 +16,7 @@
  Target Server Version : 80036 (8.0.36)
  File Encoding         : 65001
 
- Date: 31/05/2025 15:02:07
+ Date: 31/05/2025 21:10:04
 */
 
 SET NAMES utf8mb4;
@@ -38,9 +43,13 @@ CREATE TABLE `bilibili_accounts`  (
   UNIQUE INDEX `user_dedeuserid`(`user_id` ASC, `dedeuserid` ASC) USING BTREE,
   INDEX `idx_user_id`(`user_id` ASC) USING BTREE,
   INDEX `idx_dedeuserid`(`dedeuserid` ASC) USING BTREE,
-  INDEX `idx_is_active`(`is_active` ASC) USING BTREE,
-  CONSTRAINT `bilibili_accounts_ibfk_1` FOREIGN KEY (`user_id`) REFERENCES `user` (`id`) ON DELETE CASCADE ON UPDATE CASCADE
+  INDEX `idx_is_active`(`is_active` ASC) USING BTREE
 ) ENGINE = InnoDB AUTO_INCREMENT = 2 CHARACTER SET = utf8mb4 COLLATE = utf8mb4_unicode_ci COMMENT = 'B站账号登录信息表' ROW_FORMAT = DYNAMIC;
+
+-- ----------------------------
+-- Records of bilibili_accounts
+-- ----------------------------
+INSERT INTO `bilibili_accounts` VALUES (1, 8, '424572043', '203b1b383009ebe5a49f76ecd143acad', 'DedeUserID=424572043; bili_jct=203b1b383009ebe5a49f76ecd143acad; SESSDATA=0bb77fa8,1764225078,be381*52CjCq18rDvk7nT_T_UKIW8PwzpdOae1TFQNf8aNi7hFU7Jusd0cVCgOvVbP9N-ymFTBYSVjFWdXl0OEdva0FjSFBJOXR5THNSemwtZzZGXy1NSGY3Z0lTZ1NKNGN5M1BhOUQtOG1IalRDUUVCMHd0cGltN01IN2gzdmxIV1ViME9naE1hVkdmckRRIIEC; DedeUserID__ckMd5=4759cf6b6b604ad0;', '未知用户', '', 1, '2025-05-31 06:31:18', NULL, '2025-05-31 06:31:18', '2025-05-31 06:31:18');
 
 -- ----------------------------
 -- Table structure for loginverification
@@ -69,6 +78,19 @@ CREATE TABLE `loginverification`  (
 ) ENGINE = InnoDB AUTO_INCREMENT = 12 CHARACTER SET = utf8mb4 COLLATE = utf8mb4_unicode_ci ROW_FORMAT = DYNAMIC;
 
 -- ----------------------------
+-- Records of loginverification
+-- ----------------------------
+INSERT INTO `loginverification` VALUES (3, 'admin0', 'admin0@bb.com', NULL, '$2a$10$FkYjq2BUcE/PfO59eIPTmefax3UhqmDcNmjPg/gy5iRGOBt9wRr9u', '0', NULL, 3, '2025-05-29 07:45:28', '2025-05-29 07:45:28');
+INSERT INTO `loginverification` VALUES (4, 'admin1', 'admin1@bb.com', NULL, '$2a$10$uHU7aKOkFMwFJ3vZFyWLk.uBepKRuGert0Qmf.zCBtCvSnwMcHo7y', '1', NULL, 4, '2025-05-29 07:46:45', '2025-05-29 07:46:45');
+INSERT INTO `loginverification` VALUES (5, 'admin2', 'admin2@bb.com', NULL, '$2a$10$VuF5p/9JkTZ64dIsymbvHuCwHJe.QueFeOQ5DKcDdcNdHzpNi6V1q', '2', NULL, 5, '2025-05-29 07:46:58', '2025-05-29 07:46:58');
+INSERT INTO `loginverification` VALUES (6, 'admin3', 'admin3@bb.com', NULL, '$2a$10$u.COXkudYmOEehDSwuJEJ.R7t9yVQXFAQabe4z.rCeSltBWXClxpC', '3', NULL, 6, '2025-05-29 07:47:09', '2025-05-29 07:47:09');
+INSERT INTO `loginverification` VALUES (7, 'admin4', 'admin4@bb.com', NULL, '$2a$10$RiiiCelIz60M60atW9yzUuyVa.jVCYP9P/JMIWud92jueNKSszmLG', '4', NULL, 7, '2025-05-29 07:47:20', '2025-05-29 07:47:20');
+INSERT INTO `loginverification` VALUES (8, 'admin', 'admin@bb.com', NULL, '$2a$10$3tpUp0eDs3uPiwMURuSJkuIk2NpGCmlzjPBSzOjAh9yShCob4iw5C', '1', NULL, 8, '2025-05-29 08:22:38', '2025-05-29 08:22:38');
+INSERT INTO `loginverification` VALUES (9, '莫建明', '1181584752@qq.com', NULL, '$2a$10$G06giU77zNKluboka54l2.j/zUPuOglw5zaGjCpEifKYlQPUrxPBm', '1', NULL, 9, '2025-05-31 05:37:28', '2025-05-31 05:37:28');
+INSERT INTO `loginverification` VALUES (10, '周紫潞', '166331852@qq.com', NULL, '$2a$10$1fuJ2fttwd6C9wzhSa9epeewML3vH1GRoUfIvPb46GlclwE.M9OL.', '1', NULL, 10, '2025-05-31 05:40:40', '2025-05-31 05:40:40');
+INSERT INTO `loginverification` VALUES (11, 'test1', 'test1@bb.com', NULL, '$2a$10$KcSkfxo6JfC4mNjMPUdotuge6otYdlhQp4puS7oljsHjDueFMy2ry', '1', NULL, 11, '2025-05-31 05:47:30', '2025-05-31 05:47:30');
+
+-- ----------------------------
 -- Table structure for user
 -- ----------------------------
 DROP TABLE IF EXISTS `user`;
@@ -88,6 +110,41 @@ CREATE TABLE `user`  (
   INDEX `idx_user_email`(`email` ASC) USING BTREE,
   INDEX `idx_user_openid`(`openid` ASC) USING BTREE
 ) ENGINE = InnoDB AUTO_INCREMENT = 12 CHARACTER SET = utf8mb4 COLLATE = utf8mb4_unicode_ci ROW_FORMAT = DYNAMIC;
+
+-- ----------------------------
+-- Records of user
+-- ----------------------------
+INSERT INTO `user` VALUES (3, 'admin0', 'admin0@bb.com', NULL, NULL, NULL, NULL, '2025-05-29 07:45:27', '2025-05-29 07:45:27');
+INSERT INTO `user` VALUES (4, 'admin1', 'admin1@bb.com', NULL, NULL, NULL, NULL, '2025-05-29 07:46:45', '2025-05-29 07:46:45');
+INSERT INTO `user` VALUES (5, 'admin2', 'admin2@bb.com', NULL, NULL, NULL, NULL, '2025-05-29 07:46:58', '2025-05-29 07:46:58');
+INSERT INTO `user` VALUES (6, 'admin3', 'admin3@bb.com', NULL, NULL, NULL, NULL, '2025-05-29 07:47:09', '2025-05-29 07:47:09');
+INSERT INTO `user` VALUES (7, 'admin4', 'admin4@bb.com', NULL, NULL, NULL, NULL, '2025-05-29 07:47:20', '2025-05-29 07:47:20');
+INSERT INTO `user` VALUES (8, 'admin', 'admin@bb.com', NULL, NULL, NULL, NULL, '2025-05-29 08:22:38', '2025-05-29 08:22:38');
+INSERT INTO `user` VALUES (9, '莫建明', '1181584752@qq.com', NULL, NULL, NULL, NULL, '2025-05-31 05:37:27', '2025-05-31 05:37:27');
+INSERT INTO `user` VALUES (10, '周紫潞', '166331852@qq.com', NULL, NULL, NULL, NULL, '2025-05-31 05:40:40', '2025-05-31 05:40:40');
+INSERT INTO `user` VALUES (11, 'test1', 'test1@bb.com', NULL, NULL, NULL, NULL, '2025-05-31 05:47:30', '2025-05-31 05:47:30');
+
+-- ----------------------------
+-- Table structure for user_videos
+-- ----------------------------
+DROP TABLE IF EXISTS `user_videos`;
+CREATE TABLE `user_videos`  (
+  `id` int NOT NULL AUTO_INCREMENT COMMENT '主键ID',
+  `user_id` int NOT NULL COMMENT '用户ID，关联user表',
+  `video_id` int NOT NULL COMMENT '视频ID，关联videos表',
+  `relation_type` enum('owner','processor','downloader') CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci NOT NULL DEFAULT 'processor' COMMENT '关系类型：owner=UP主，processor=处理者，downloader=下载者',
+  `created_at` timestamp NULL DEFAULT CURRENT_TIMESTAMP COMMENT '关联创建时间',
+  `updated_at` timestamp NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '最后更新时间',
+  PRIMARY KEY (`id`) USING BTREE,
+  UNIQUE INDEX `uk_user_video_type`(`user_id` ASC, `video_id` ASC, `relation_type` ASC) USING BTREE COMMENT '用户-视频-关系类型唯一约束',
+  INDEX `idx_user_id`(`user_id` ASC) USING BTREE,
+  INDEX `idx_video_id`(`video_id` ASC) USING BTREE,
+  INDEX `idx_relation_type`(`relation_type` ASC) USING BTREE
+) ENGINE = InnoDB CHARACTER SET = utf8mb4 COLLATE = utf8mb4_unicode_ci COMMENT = '用户视频关联表' ROW_FORMAT = Dynamic;
+
+-- ----------------------------
+-- Records of user_videos
+-- ----------------------------
 
 -- ----------------------------
 -- Table structure for videos
@@ -118,6 +175,7 @@ CREATE TABLE `videos`  (
   `cid` varchar(255) CHARACTER SET utf8mb3 COLLATE utf8mb3_unicode_ci NULL DEFAULT NULL COMMENT 'cid',
   PRIMARY KEY (`id`) USING BTREE,
   UNIQUE INDEX `video_id`(`bvid`) USING BTREE
-) ENGINE = MyISAM AUTO_INCREMENT = 94 CHARACTER SET = utf8mb3 COLLATE = utf8mb3_unicode_ci ROW_FORMAT = DYNAMIC;
+) ENGINE = MyISAM AUTO_INCREMENT = 98 CHARACTER SET = utf8mb3 COLLATE = utf8mb3_unicode_ci ROW_FORMAT = DYNAMIC;
+
 
 SET FOREIGN_KEY_CHECKS = 1;

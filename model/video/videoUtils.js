@@ -258,18 +258,19 @@ async function saveOrUpdateVideoInDb(videoInfo, filePath, playUrl, userId, bilib
          title = ?, pic = ?, view = ?, danmaku = ?, \`like\` = ?, 
          coin = ?, favorite = ?, share = ?, reply = ?, 
          name = ?, face = ?, pubdate = ?, 
-         quality = ?, \`desc\` = ?, duration = ?, aid = ?, download_link = ?
+         quality = ?, \`desc\` = ?, duration = ?, aid = ?, download_link = ?,
+         cid = ?, tname = ?, current_viewers = ?
          WHERE bvid = ?`,
         [
           videoInfo.title,
           videoInfo.pic || "",
-          videoInfo.view || 0,
+          videoInfo.stat?.view || 0,
           videoInfo.stat?.danmaku || 0,
-          videoInfo.like || 0,
-          videoInfo.coin || 0,
-          videoInfo.favorite || 0,
-          videoInfo.share || 0,
-          videoInfo.reply || 0,
+          videoInfo.stat?.like || 0,
+          videoInfo.stat?.coin || 0,
+          videoInfo.stat?.favorite || 0,
+          videoInfo.stat?.share || 0,
+          videoInfo.stat?.reply || 0,
           videoInfo.owner?.name || "未知",
           videoInfo.owner?.face || "",
           videoInfo.pubdate || "",
@@ -278,6 +279,9 @@ async function saveOrUpdateVideoInDb(videoInfo, filePath, playUrl, userId, bilib
           videoInfo.duration || 0,
           videoInfo.aid || "",
           playUrl,
+          videoInfo.cid || "",
+          videoInfo.tname || "",
+          videoInfo.stat?.now_rank || 0,
           videoInfo.bvid
         ]
       );
@@ -296,27 +300,30 @@ async function saveOrUpdateVideoInDb(videoInfo, filePath, playUrl, userId, bilib
       const [result] = await db.execute(
         `INSERT INTO videos (
           bvid, aid, title, pic, view, danmaku, \`like\`, coin, favorite, share, reply,
-          name, face, pubdate, quality, \`desc\`, duration, download_link
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+          name, face, pubdate, quality, \`desc\`, duration, download_link, cid, tname, current_viewers
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         [
           videoInfo.bvid,
           videoInfo.aid || "",
           videoInfo.title,
           videoInfo.pic || "",
-          videoInfo.view || 0,
+          videoInfo.stat?.view || 0,
           videoInfo.stat?.danmaku || 0,
-          videoInfo.like || 0,
-          videoInfo.coin || 0,
-          videoInfo.favorite || 0,
-          videoInfo.share || 0,
-          videoInfo.reply || 0,
+          videoInfo.stat?.like || 0,
+          videoInfo.stat?.coin || 0,
+          videoInfo.stat?.favorite || 0,
+          videoInfo.stat?.share || 0,
+          videoInfo.stat?.reply || 0,
           videoInfo.owner?.name || "未知",
           videoInfo.owner?.face || "",
           videoInfo.pubdate || "",
           videoInfo.quality || 80,
           videoInfo.description || "",
           videoInfo.duration || 0,
-          playUrl
+          playUrl,
+          videoInfo.cid || "",
+          videoInfo.tname || "",
+          videoInfo.stat?.now_rank || 0
         ]
       );
       

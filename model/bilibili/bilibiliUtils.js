@@ -582,15 +582,34 @@ async function getBilibiliVideoInfo(bvid, cookieString) {
       videoUrl = playData.durl[0].url;
     }
 
+    // 返回完整的视频信息，包含所有可用字段
     return {
+      // 基本信息
+      aid: videoData.aid,
+      bvid: videoData.bvid,
+      cid: videoData.cid,
       title: videoData.title,
       description: videoData.desc,
-      duration: videoData.duration,
       pic: videoData.pic,
+      
+      // 时间信息
+      duration: videoData.duration,
+      pubdate: videoData.pubdate,
+      ctime: videoData.ctime,
+      
+      // 分区信息
+      tid: videoData.tid,
+      tname: videoData.tname,
+      copyright: videoData.copyright,
+      
+      // UP主信息
       owner: {
+        mid: videoData.owner.mid,
         name: videoData.owner.name,
-        mid: videoData.owner.mid
+        face: videoData.owner.face
       },
+      
+      // 统计信息
       stat: {
         view: videoData.stat.view,
         danmaku: videoData.stat.danmaku,
@@ -598,14 +617,47 @@ async function getBilibiliVideoInfo(bvid, cookieString) {
         favorite: videoData.stat.favorite,
         coin: videoData.stat.coin,
         share: videoData.stat.share,
-        like: videoData.stat.like
+        like: videoData.stat.like,
+        now_rank: videoData.stat.now_rank || 0,
+        his_rank: videoData.stat.his_rank || 0,
+        evaluation: videoData.stat.evaluation || ''
       },
+      
+      // 视频属性
+      videos: videoData.videos, // 分P数量
+      pages: videoData.pages || [],
+      subtitle: videoData.subtitle || {},
+      
+      // 权限和状态
+      state: videoData.state,
+      attribute: videoData.attribute,
+      
+      // 下载相关
       downloadUrls: {
         video: videoUrl,
         audio: audioUrl
       },
       quality: playData.quality || 80,
-      format: playData.format || 'mp4'
+      format: playData.format || 'mp4',
+      
+      // 其他信息
+      mission_id: videoData.mission_id || null,
+      redirect_url: videoData.redirect_url || null,
+      
+      // 标签信息
+      tag: videoData.tag || [],
+      
+      // 荣誉信息
+      honor_reply: videoData.honor_reply || {},
+      
+      // 用户权限
+      user_garb: videoData.user_garb || {},
+      
+      // 互动信息
+      elec: videoData.elec || null,
+      
+      // 合集信息
+      ugc_season: videoData.ugc_season || null
     };
   } catch (error) {
     console.error('获取B站视频信息失败:', error);
