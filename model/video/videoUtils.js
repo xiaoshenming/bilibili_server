@@ -424,22 +424,87 @@ async function processVideoRequest(options) {
   } = options;
   
   try {
-    // 1. 解析视频信息
+    // 0. 提取BVID进行预检查
+    const bvid = extractBVID(url);
+    if (!bvid) {
+      throw new Error('无法从URL中提取BVID');
+    }
+    
+    // 1. 检查数据库和文件是否已存在（优化：避免重复解析）
+    const finalFileName = `${bvid}.mp4`;
+    const finalVideoPath = path.join(VIDEO_DIR, finalFileName);
+    
+    // 检查数据库中是否已有记录
+    const [existingRecords] = await db.execute(
+      'SELECT * FROM videos WHERE bvid = ?',
+      [bvid]
+    );
+    
+    // 检查文件是否存在
+    const fileExists = fs.existsSync(finalVideoPath);
+    
+    if (existingRecords.length > 0 && fileExists) {
+      console.log(`✅ 发现已存在的视频记录和文件: ${bvid}`);
+      
+      // 只解析基本信息用于更新数据库
+      const videoInfo = await parseVideoInfo(url, cookieString, quality);
+      
+      // 生成播放地址
+      const serverPort = process.env.PORT || 3000;
+      const serverHost = process.env.SERVER_HOST || 'localhost';
+      const playUrl = `http://${serverHost}:${serverPort}/api/video/download/${finalFileName}`;
+      
+      // 更新数据库记录（保持文件路径不变）
+      const existingRecord = existingRecords[0];
+      await db.execute(
+        `UPDATE videos SET 
+         title = ?, pic = ?, view = ?, duration = ?, 
+         download_link = ? 
+         WHERE id = ?`,
+        [
+          videoInfo.title,
+          videoInfo.pic,
+          videoInfo.view,
+          videoInfo.duration,
+          playUrl,
+          existingRecord.id
+        ]
+      );
+      
+      console.log(`🔄 已更新现有视频记录: ${videoInfo.title}`);
+      
+      return {
+        id: existingRecord.id,
+        updated: true,
+        title: videoInfo.title,
+        bvid: bvid,
+        filePath: finalVideoPath,
+        playUrl: playUrl,
+        message: "视频已存在，仅更新数据库信息",
+        downloadMode,
+        qualityDesc: videoInfo.qualityDesc,
+        skippedProcessing: true // 标记跳过了处理过程
+      };
+    }
+    
+    console.log(`🆕 开始处理新视频或重新处理: ${bvid}`);
+    
+    // 2. 解析视频信息（完整解析用于下载）
     const videoInfo = await parseVideoInfo(url, cookieString, quality);
 
-    // 2. 创建文件名和路径
+    // 3. 创建文件名和路径
     const uniqueId = uuidv4().substring(0, 8);
     const tempVideoFileName = `${videoInfo.bvid}_${uniqueId}_video.mp4`;
     const tempAudioFileName = `${videoInfo.bvid}_${uniqueId}_audio.mp3`;
     const tempOutputFileName = `${videoInfo.bvid}_${uniqueId}_temp.mp4`;
-    const finalFileName = `${videoInfo.bvid}.mp4`; // 最终文件名只保留BVID
+    // finalFileName 已在前面声明过，这里不需要重复声明
 
     const tempVideoPath = path.join(DOWNLOAD_DIR, tempVideoFileName);
     const tempAudioPath = path.join(DOWNLOAD_DIR, tempAudioFileName);
     const tempOutputPath = path.join(DOWNLOAD_DIR, tempOutputFileName);
-    const finalVideoPath = path.join(VIDEO_DIR, finalFileName);
+    // finalVideoPath 也已在前面声明过，这里不需要重复声明
 
-    // 3. 下载视频和音频
+    // 4. 下载视频和音频
     console.log(`📥 开始下载视频和音频...`);
     
     const downloadPromises = [];
@@ -462,7 +527,7 @@ async function processVideoRequest(options) {
     
     await Promise.all(downloadPromises);
 
-    // 4. 合并视频和音频（如果都下载了）
+    // 5. 合并视频和音频（如果都下载了）
     let tempFinalPath = tempOutputPath;
     if (downloadMode === "auto" && fs.existsSync(tempVideoPath) && fs.existsSync(tempAudioPath)) {
       console.log(`🔧 开始合并视频和音频: ${finalFileName}`);
@@ -484,7 +549,7 @@ async function processVideoRequest(options) {
       tempFinalPath = tempAudioPath;
     }
 
-    // 5. 移动文件到最终目录
+    // 6. 移动文件到最终目录
     if (fs.existsSync(tempFinalPath)) {
       // 如果最终文件已存在，先删除
       if (fs.existsSync(finalVideoPath)) {
@@ -498,12 +563,12 @@ async function processVideoRequest(options) {
       throw new Error('处理后的视频文件不存在');
     }
 
-    // 6. 生成播放地址 - 使用SERVER_HOST配置
+    // 7. 生成播放地址 - 使用SERVER_HOST配置
     const serverPort = process.env.PORT || 3000;
     const serverHost = process.env.SERVER_HOST || 'localhost';
     const playUrl = `http://${serverHost}:${serverPort}/api/video/download/${finalFileName}`;
 
-    // 7. 保存到数据库
+    // 8. 保存到数据库
     const dbRecord = await saveOrUpdateVideoInDb(videoInfo, finalVideoPath, playUrl, userId, bilibiliAccountId);
 
     return {
