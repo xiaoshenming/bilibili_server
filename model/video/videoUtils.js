@@ -76,6 +76,7 @@ async function parseVideoInfo(url, cookieString, quality = 80) {
       description: videoInfo.description,
       duration: videoInfo.duration,
       view: videoInfo.stat.view,
+      danmaku: videoInfo.stat.danmaku,
       like: videoInfo.stat.like,
       coin: videoInfo.stat.coin,
       share: videoInfo.stat.share,
@@ -89,6 +90,9 @@ async function parseVideoInfo(url, cookieString, quality = 80) {
       pubdate: videoInfo.pubdate || null,
       pic: videoInfo.pic,
       pages: videoInfo.pages || [],
+      cid: videoInfo.cid || null,
+      tname: videoInfo.tname || null,
+      current_viewers: videoInfo.stat.now_rank || 0,
       quality: quality,
       qualityDesc: QUALITY_MAP[quality] || '未知画质',
       downloadUrls: videoInfo.downloadUrls,
@@ -302,18 +306,18 @@ async function saveOrUpdateVideoInDb(videoInfo, filePath, playUrl, userId, bilib
           bvid, aid, title, pic, view, danmaku, \`like\`, coin, favorite, share, reply,
           name, face, pubdate, quality, \`desc\`, duration, download_link, cid, tname, current_viewers
         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-        [
+        [  
           videoInfo.bvid,
           videoInfo.aid || "",
           videoInfo.title,
           videoInfo.pic || "",
-          videoInfo.stat?.view || 0,
-          videoInfo.stat?.danmaku || 0,
-          videoInfo.stat?.like || 0,
-          videoInfo.stat?.coin || 0,
-          videoInfo.stat?.favorite || 0,
-          videoInfo.stat?.share || 0,
-          videoInfo.stat?.reply || 0,
+          videoInfo.view || 0,
+          videoInfo.danmaku || 0,
+          videoInfo.like || 0,
+          videoInfo.coin || 0,
+          videoInfo.favorite || 0,
+          videoInfo.share || 0,
+          videoInfo.reply || 0,
           videoInfo.owner?.name || "未知",
           videoInfo.owner?.face || "",
           videoInfo.pubdate || "",
@@ -323,7 +327,7 @@ async function saveOrUpdateVideoInDb(videoInfo, filePath, playUrl, userId, bilib
           playUrl,
           videoInfo.cid || "",
           videoInfo.tname || "",
-          videoInfo.stat?.now_rank || 0
+          videoInfo.current_viewers || 0
         ]
       );
       
@@ -465,15 +469,33 @@ async function processVideoRequest(options) {
       const existingRecord = existingRecords[0];
       await db.execute(
         `UPDATE videos SET 
-         title = ?, pic = ?, view = ?, duration = ?, 
-         download_link = ? 
+         title = ?, pic = ?, view = ?, danmaku = ?, \`like\` = ?, 
+         coin = ?, favorite = ?, share = ?, reply = ?, 
+         name = ?, face = ?, pubdate = ?, 
+         quality = ?, \`desc\` = ?, duration = ?, aid = ?, download_link = ?,
+         cid = ?, tname = ?, current_viewers = ?
          WHERE id = ?`,
         [
           videoInfo.title,
-          videoInfo.pic,
-          videoInfo.view,
-          videoInfo.duration,
+          videoInfo.pic || "",
+          videoInfo.view || 0,
+          videoInfo.danmaku || 0,
+          videoInfo.like || 0,
+          videoInfo.coin || 0,
+          videoInfo.favorite || 0,
+          videoInfo.share || 0,
+          videoInfo.reply || 0,
+          videoInfo.owner?.name || "未知",
+          videoInfo.owner?.face || "",
+          videoInfo.pubdate || "",
+          videoInfo.quality || 80,
+          videoInfo.description || "",
+          videoInfo.duration || 0,
+          videoInfo.aid || "",
           playUrl,
+          videoInfo.cid || "",
+          videoInfo.tname || "",
+          videoInfo.current_viewers || 0,
           existingRecord.id
         ]
       );
