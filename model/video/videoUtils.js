@@ -704,10 +704,10 @@ async function checkDownloadPermission(fileName, userId) {
     // 从文件名提取BVID
     const bvid = fileName.replace(/\.(mp4|mp3)$/, '');
     
-    // 查询数据库确认用户是否有权限访问该视频
+    // 查询数据库确认视频是否存在（由于videos表没有user_id字段，这里只检查视频是否存在）
     const [rows] = await db.execute(
-      'SELECT id FROM videos WHERE bvid = ? AND user_id = ?',
-      [bvid, userId]
+      'SELECT id FROM videos WHERE bvid = ?',
+      [bvid]
     );
     
     return rows.length > 0;
