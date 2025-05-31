@@ -273,7 +273,13 @@ async function saveOrUpdateVideoInDb(videoInfo, filePath, userId, bilibiliAccoun
       );
       
       console.log(`✅ 视频信息已更新: ${videoInfo.title}`);
-      return { id: existingVideos[0].id, updated: true };
+      return { 
+        id: existingVideos[0].id, 
+        updated: true,
+        title: videoInfo.title,
+        bvid: videoInfo.bvid,
+        filePath: filePath
+      };
     } else {
       // 插入新记录
       const [result] = await db.execute(
@@ -303,7 +309,13 @@ async function saveOrUpdateVideoInDb(videoInfo, filePath, userId, bilibiliAccoun
       );
       
       console.log(`✅ 视频信息已保存: ${videoInfo.title}`);
-      return { id: result.insertId, updated: false };
+      return { 
+        id: result.insertId, 
+        updated: false,
+        title: videoInfo.title,
+        bvid: videoInfo.bvid,
+        filePath: filePath
+      };
     }
   } catch (error) {
     console.error('❌ 保存视频信息到数据库失败:', error);
