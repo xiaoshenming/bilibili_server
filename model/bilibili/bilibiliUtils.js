@@ -143,34 +143,105 @@ async function pollBilibiliLoginStatus(sessionId, qrcode_key) {
  */
 async function handleSuccessfulLogin(sessionId, userId, loginUrl) {
   try {
-    // 访问登录URL获取cookie
-    const response = await axios.get(loginUrl, {
-      headers: BILIBILI_HEADERS,
-      maxRedirects: 5
-    });
+    console.log('开始处理登录成功，URL:', loginUrl);
     
-    const cookies = response.headers['set-cookie'];
-    if (!cookies) {
-      throw new Error('未获取到登录cookie');
-    }
-    
-    // 解析cookie
-    const cookieObj = {};
+    let cookieObj = {};
     let cookieString = '';
     
-    cookies.forEach(cookie => {
-      const parts = cookie.split(';')[0].split('=');
-      if (parts.length === 2) {
-        cookieObj[parts[0]] = parts[1];
-        cookieString += `${parts[0]}=${parts[1]}; `;
+    // 方法1: 从URL参数中解析cookie（适用于crossDomain类型的URL）
+    try {
+      const urlObj = new URL(loginUrl);
+      const urlParams = urlObj.searchParams;
+      
+      // 检查URL参数中是否包含cookie信息
+      if (urlParams.has('DedeUserID') && urlParams.has('bili_jct')) {
+        cookieObj.DedeUserID = urlParams.get('DedeUserID');
+        cookieObj.bili_jct = urlParams.get('bili_jct');
+        cookieObj.SESSDATA = urlParams.get('SESSDATA') || '';
+        cookieObj.DedeUserID__ckMd5 = urlParams.get('DedeUserID__ckMd5') || '';
+        
+        cookieString = `DedeUserID=${cookieObj.DedeUserID}; bili_jct=${cookieObj.bili_jct}; SESSDATA=${cookieObj.SESSDATA}; DedeUserID__ckMd5=${cookieObj.DedeUserID__ckMd5}; `;
+        console.log('从URL参数中解析到cookie:', cookieObj);
       }
-    });
+    } catch (urlError) {
+      console.log('URL解析失败，尝试其他方法:', urlError.message);
+    }
+    
+    // 方法2: 如果URL解析失败，尝试访问登录URL获取cookie
+    if (!cookieObj.DedeUserID || !cookieObj.bili_jct) {
+      console.log('尝试通过HTTP请求获取cookie');
+      
+      try {
+        const response = await axios.get(loginUrl, {
+          headers: {
+            ...BILIBILI_HEADERS,
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
+          },
+          maxRedirects: 10,
+          timeout: 10000,
+          validateStatus: function (status) {
+            return status >= 200 && status < 400;
+          }
+        });
+        
+        const cookies = response.headers['set-cookie'];
+        console.log('HTTP响应headers:', response.headers);
+        console.log('HTTP响应cookie:', cookies);
+        
+        if (cookies && cookies.length > 0) {
+          cookies.forEach(cookie => {
+            const parts = cookie.split(';')[0].split('=');
+            if (parts.length === 2) {
+              cookieObj[parts[0]] = parts[1];
+              cookieString += `${parts[0]}=${parts[1]}; `;
+            }
+          });
+        }
+        
+        // 检查响应体是否包含cookie信息
+        if (response.data && typeof response.data === 'object') {
+          console.log('HTTP响应数据:', response.data);
+          
+          // 检查是否有cookie_info字段
+          if (response.data.cookie_info && response.data.cookie_info.cookies) {
+            response.data.cookie_info.cookies.forEach(cookie => {
+              cookieObj[cookie.name] = cookie.value;
+              cookieString += `${cookie.name}=${cookie.value}; `;
+            });
+          }
+        }
+      } catch (httpError) {
+        console.log('HTTP请求失败:', httpError.message);
+      }
+    }
+    
+    // 方法3: 尝试解析URL中的所有参数
+    if (!cookieObj.DedeUserID || !cookieObj.bili_jct) {
+      console.log('尝试解析URL中的所有参数');
+      
+      // 使用更强的正则表达式解析URL参数
+      const paramRegex = /[?&]([^=&]+)=([^&]*)/g;
+      let match;
+      
+      while ((match = paramRegex.exec(loginUrl)) !== null) {
+        const key = decodeURIComponent(match[1]);
+        const value = decodeURIComponent(match[2]);
+        
+        if (['DedeUserID', 'bili_jct', 'SESSDATA', 'DedeUserID__ckMd5', 'sid'].includes(key)) {
+          cookieObj[key] = value;
+          cookieString += `${key}=${value}; `;
+        }
+      }
+    }
     
     const dedeuserid = cookieObj.DedeUserID;
     const bili_jct = cookieObj.bili_jct;
+    const sessdata = cookieObj.SESSDATA;
+    
+    console.log('最终解析的cookie:', { dedeuserid, bili_jct, sessdata, cookieString });
     
     if (!dedeuserid || !bili_jct) {
-      throw new Error('登录cookie不完整');
+      throw new Error(`登录cookie不完整: DedeUserID=${dedeuserid}, bili_jct=${bili_jct}, SESSDATA=${sessdata}`);
     }
     
     // 获取用户信息
