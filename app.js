@@ -19,10 +19,11 @@ app.use(express.json()); // 解析 JSON 请求体
 
 // --- 静态文件服务 ---
 // 提供视频文件的直接访问服务
-const path = require("path");
-const serveIndex = require("serve-index");
-const videoDir = path.join(__dirname, "videos"); // 更新为videos目录
-app.use("/api/videos", express.static(videoDir), serveIndex(videoDir, { icons: true }));
+// 移除静态文件服务 - 改为安全的token验证下载方案
+// const path = require("path");
+// const serveIndex = require("serve-index");
+// const videoDir = path.join(__dirname, "videos");
+// app.use("/api/videos", express.static(videoDir), serveIndex(videoDir, { icons: true }));
 
 // --- 路由 ---
 app.use("/api", userRouter); // 挂载用户路由，建议添加前缀 /user

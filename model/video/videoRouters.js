@@ -245,4 +245,149 @@ router.delete("/:id", authorize(["1", "2", "3"]), async (req, res) => {
   }
 });
 
+/**
+ * @api {post} /api/video/generate-download-link
+ * @description 生成安全下载链接
+ * @access Protected - 需要用户登录
+ */
+router.post("/generate-download-link", authorize(["1", "2", "3"]), async (req, res) => {
+  try {
+    const { fileName } = req.body;
+    const userId = req.user.uid || req.user.id;
+    
+    if (!fileName) {
+      return res.status(400).json({
+        code: 400,
+        message: "文件名不能为空",
+        data: null,
+      });
+    }
+    
+    // 检查用户是否有权限下载该文件
+    const hasPermission = await videoUtils.checkDownloadPermission(fileName, userId);
+    if (!hasPermission) {
+      return res.status(403).json({
+        code: 403,
+        message: "无权限下载该文件",
+        data: null,
+      });
+    }
+    
+    // 生成安全下载链接
+    const downloadInfo = videoUtils.generateSecureDownloadLink(fileName, userId);
+    
+    res.status(200).json({
+      code: 200,
+      message: "下载链接生成成功",
+      data: downloadInfo,
+    });
+  } catch (error) {
+    console.error("生成下载链接失败:", error);
+    res.status(500).json({
+      code: 500,
+      message: error.message || "生成下载链接失败",
+      data: null,
+    });
+  }
+});
+
+/**
+ * @api {get} /api/video/secure-download
+ * @description 安全文件下载（支持断点续传）
+ * @access Public - 通过token验证
+ */
+router.get("/secure-download", async (req, res) => {
+  try {
+    const { token, file } = req.query;
+    
+    if (!token || !file) {
+      return res.status(400).json({
+        code: 400,
+        message: "缺少必要参数",
+        data: null,
+      });
+    }
+    
+    // 验证token
+    const payload = videoUtils.verifyDownloadToken(token);
+    if (!payload) {
+      return res.status(401).json({
+        code: 401,
+        message: "下载链接已过期或无效",
+        data: null,
+      });
+    }
+    
+    // 验证文件名是否匹配
+    if (payload.fileName !== file) {
+      return res.status(403).json({
+        code: 403,
+        message: "文件访问权限验证失败",
+        data: null,
+      });
+    }
+    
+    // 再次检查用户权限
+    const hasPermission = await videoUtils.checkDownloadPermission(file, payload.userId);
+    if (!hasPermission) {
+      return res.status(403).json({
+        code: 403,
+        message: "无权限下载该文件",
+        data: null,
+      });
+    }
+    
+    // 处理安全下载
+    await videoUtils.handleSecureDownload(file, req, res);
+    
+  } catch (error) {
+    console.error("安全下载失败:", error);
+    if (!res.headersSent) {
+      res.status(500).json({
+        code: 500,
+        message: error.message || "下载失败",
+        data: null,
+      });
+    }
+  }
+});
+
+/**
+ * @api {get} /api/video/download/:bvid
+ * @description 直接下载视频（兼容旧版本）
+ * @access Protected - 需要用户登录
+ */
+router.get("/download/:bvid", authorize(["1", "2", "3"]), async (req, res) => {
+  try {
+    const { bvid } = req.params;
+    const userId = req.user.uid || req.user.id;
+    
+    // 构造文件名
+    const fileName = `${bvid}.mp4`;
+    
+    // 检查用户是否有权限下载该文件
+    const hasPermission = await videoUtils.checkDownloadPermission(fileName, userId);
+    if (!hasPermission) {
+      return res.status(403).json({
+        code: 403,
+        message: "无权限下载该文件",
+        data: null,
+      });
+    }
+    
+    // 处理安全下载
+    await videoUtils.handleSecureDownload(fileName, req, res);
+    
+  } catch (error) {
+    console.error("直接下载失败:", error);
+    if (!res.headersSent) {
+      res.status(500).json({
+        code: 500,
+        message: error.message || "下载失败",
+        data: null,
+      });
+    }
+  }
+});
+
 module.exports = router;

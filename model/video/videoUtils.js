@@ -5,6 +5,8 @@ const fs = require("fs");
 const path = require("path");
 const { spawn } = require("child_process");
 const { v4: uuidv4 } = require("uuid");
+const jwt = require("jsonwebtoken");
+const crypto = require("crypto");
 const db = require("../../config/db").promise();
 const bilibiliUtils = require("../bilibili/bilibiliUtils");
 
@@ -496,10 +498,10 @@ async function processVideoRequest(options) {
       throw new Error('处理后的视频文件不存在');
     }
 
-    // 6. 生成播放地址
+    // 6. 生成播放地址 - 使用SERVER_HOST配置
     const serverPort = process.env.PORT || 3000;
-    const serverHost = process.env.HOST || 'localhost';
-    const playUrl = `http://${serverHost}:${serverPort}/api/videos/${finalFileName}`;
+    const serverHost = process.env.SERVER_HOST || 'localhost';
+    const playUrl = `http://${serverHost}:${serverPort}/api/video/download/${finalFileName}`;
 
     // 7. 保存到数据库
     const dbRecord = await saveOrUpdateVideoInDb(videoInfo, finalVideoPath, playUrl, userId, bilibiliAccountId);
@@ -576,6 +578,137 @@ async function batchProcessVideos(options) {
   return results;
 }
 
+/**
+ * 生成安全下载token
+ * @param {string} fileName - 文件名
+ * @param {string} userId - 用户ID
+ * @param {number} expiresIn - 过期时间（秒），默认1小时
+ * @returns {string} JWT token
+ */
+function generateDownloadToken(fileName, userId, expiresIn = 3600) {
+  const payload = {
+    fileName,
+    userId,
+    type: 'download',
+    timestamp: Date.now()
+  };
+  
+  return jwt.sign(payload, process.env.JWT_SECRET, { expiresIn });
+}
+
+/**
+ * 验证下载token
+ * @param {string} token - JWT token
+ * @returns {object|null} 解码后的payload或null
+ */
+function verifyDownloadToken(token) {
+  try {
+    return jwt.verify(token, process.env.JWT_SECRET);
+  } catch (error) {
+    console.error('Token验证失败:', error.message);
+    return null;
+  }
+}
+
+/**
+ * 生成临时下载链接
+ * @param {string} fileName - 文件名
+ * @param {string} userId - 用户ID
+ * @returns {object} 包含下载链接和token的对象
+ */
+function generateSecureDownloadLink(fileName, userId) {
+  const token = generateDownloadToken(fileName, userId, 3600); // 1小时有效期
+  const serverPort = process.env.PORT || 3000;
+  const serverHost = process.env.SERVER_HOST || 'localhost';
+  
+  return {
+    downloadUrl: `http://${serverHost}:${serverPort}/api/video/secure-download?token=${token}&file=${encodeURIComponent(fileName)}`,
+    token,
+    expiresAt: new Date(Date.now() + 3600 * 1000).toISOString()
+  };
+}
+
+/**
+ * 检查用户是否有权限下载指定文件
+ * @param {string} fileName - 文件名
+ * @param {string} userId - 用户ID
+ * @returns {boolean} 是否有权限
+ */
+async function checkDownloadPermission(fileName, userId) {
+  try {
+    // 从文件名提取BVID
+    const bvid = fileName.replace(/\.(mp4|mp3)$/, '');
+    
+    // 查询数据库确认用户是否有权限访问该视频
+    const [rows] = await db.execute(
+      'SELECT id FROM videos WHERE bvid = ? AND user_id = ?',
+      [bvid, userId]
+    );
+    
+    return rows.length > 0;
+  } catch (error) {
+    console.error('检查下载权限失败:', error);
+    return false;
+  }
+}
+
+/**
+ * 安全文件下载处理
+ * @param {string} fileName - 文件名
+ * @param {object} req - Express请求对象
+ * @param {object} res - Express响应对象
+ */
+async function handleSecureDownload(fileName, req, res) {
+  try {
+    const filePath = path.join(VIDEO_DIR, fileName);
+    
+    // 检查文件是否存在
+    if (!fs.existsSync(filePath)) {
+      return res.status(404).json({
+        code: 404,
+        message: '文件不存在'
+      });
+    }
+    
+    // 获取文件信息
+    const stat = fs.statSync(filePath);
+    const fileSize = stat.size;
+    
+    // 设置响应头，支持断点续传
+    res.setHeader('Content-Type', 'application/octet-stream');
+    res.setHeader('Content-Disposition', `attachment; filename="${encodeURIComponent(fileName)}"`);
+    res.setHeader('Accept-Ranges', 'bytes');
+    res.setHeader('Content-Length', fileSize);
+    
+    // 处理Range请求（断点续传）
+    const range = req.headers.range;
+    if (range) {
+      const parts = range.replace(/bytes=/, "").split("-");
+      const start = parseInt(parts[0], 10);
+      const end = parts[1] ? parseInt(parts[1], 10) : fileSize - 1;
+      const chunksize = (end - start) + 1;
+      
+      res.status(206);
+      res.setHeader('Content-Range', `bytes ${start}-${end}/${fileSize}`);
+      res.setHeader('Content-Length', chunksize);
+      
+      const stream = fs.createReadStream(filePath, { start, end });
+      stream.pipe(res);
+    } else {
+      // 完整文件下载
+      const stream = fs.createReadStream(filePath);
+      stream.pipe(res);
+    }
+    
+  } catch (error) {
+    console.error('安全下载处理失败:', error);
+    res.status(500).json({
+      code: 500,
+      message: '下载失败'
+    });
+  }
+}
+
 module.exports = {
   parseVideoInfo,
   downloadFile,
@@ -587,5 +720,10 @@ module.exports = {
   processVideoRequest,
   batchProcessVideos,
   extractBVID,
-  QUALITY_MAP
+  QUALITY_MAP,
+  generateDownloadToken,
+  verifyDownloadToken,
+  generateSecureDownloadLink,
+  checkDownloadPermission,
+  handleSecureDownload
 };
