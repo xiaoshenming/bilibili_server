@@ -370,7 +370,7 @@ router.get("/download/:bvid", authorize(["1", "2", "3"]), async (req, res) => {
     if (!hasPermission) {
       return res.status(403).json({
         code: 403,
-        message: "无权限下载该文件",
+        message: "无权限下载该文件，请先添加下载权限",
         data: null,
       });
     }
@@ -387,6 +387,138 @@ router.get("/download/:bvid", authorize(["1", "2", "3"]), async (req, res) => {
         data: null,
       });
     }
+  }
+});
+
+/**
+ * @api {get} /api/video/available
+ * @description 获取所有可下载的视频列表（公开接口）
+ * @access Public
+ */
+router.get("/available", async (req, res) => {
+  try {
+    const { limit = 20, offset = 0 } = req.query;
+    // 确保参数是有效的数字，避免传递NaN
+    const parsedLimit = parseInt(limit);
+    const parsedOffset = parseInt(offset);
+    const validLimit = Math.max(1, Math.min(100, isNaN(parsedLimit) ? 20 : parsedLimit));
+    const validOffset = Math.max(0, isNaN(parsedOffset) ? 0 : parsedOffset);
+    
+    const result = await videoUtils.getAvailableVideos(
+      validLimit, 
+      validOffset
+    );
+    
+    res.status(200).json({
+      code: 200,
+      message: "成功获取可下载视频列表",
+      data: result,
+    });
+  } catch (error) {
+    console.error("获取可下载视频列表失败:", error);
+    res.status(500).json({
+      code: 500,
+      message: error.message || "获取视频列表失败",
+      data: null,
+    });
+  }
+});
+
+/**
+ * @api {post} /api/video/add-download-permission
+ * @description 添加视频下载权限
+ * @access Protected - 需要用户登录
+ * @body { "bvid": "视频BVID" }
+ */
+router.post("/add-download-permission", authorize(["1", "2", "3"]), async (req, res) => {
+  try {
+    const userId = req.user.uid || req.user.id;
+    const { bvid } = req.body;
+    
+    if (!bvid || !bvid.trim()) {
+      return res.status(400).json({
+        code: 400,
+        message: "请提供有效的视频BVID",
+        data: null,
+      });
+    }
+    
+    const result = await videoUtils.addVideoDownloader(userId, bvid.trim());
+    
+    res.status(200).json({
+      code: 200,
+      message: result.message,
+      data: result,
+    });
+  } catch (error) {
+    console.error("添加下载权限失败:", error);
+    res.status(500).json({
+      code: 500,
+      message: error.message || "添加下载权限失败",
+      data: null,
+    });
+  }
+});
+
+/**
+ * @api {get} /api/video/my-permissions/:bvid
+ * @description 查看用户对特定视频的权限
+ * @access Protected - 需要用户登录
+ */
+router.get("/my-permissions/:bvid", authorize(["1", "2", "3"]), async (req, res) => {
+  try {
+    const userId = req.user.uid || req.user.id;
+    const { bvid } = req.params;
+    
+    // 检查用户对该视频的权限
+    const fileName = `${bvid}.mp4`;
+    const hasPermission = await videoUtils.checkDownloadPermission(fileName, userId);
+    
+    if (hasPermission) {
+      // 获取具体的关系类型
+      const db = require("../../config/db").promise();
+      const [relations] = await db.execute(
+        `SELECT uv.relation_type, uv.created_at, v.title 
+         FROM user_videos uv 
+         INNER JOIN videos v ON uv.video_id = v.id 
+         WHERE uv.user_id = ? AND v.bvid = ?`,
+        [userId, bvid]
+      );
+      
+      if (relations.length > 0) {
+        const relation = relations[0];
+        res.status(200).json({
+          code: 200,
+          message: "有权限访问该视频",
+          data: {
+            hasPermission: true,
+            relationType: relation.relation_type,
+            relationDesc: videoUtils.getRelationTypeDesc ? videoUtils.getRelationTypeDesc(relation.relation_type) : relation.relation_type,
+            addedAt: relation.created_at,
+            videoTitle: relation.title
+          },
+        });
+      } else {
+        res.status(200).json({
+          code: 200,
+          message: "无权限访问该视频",
+          data: { hasPermission: false },
+        });
+      }
+    } else {
+      res.status(200).json({
+        code: 200,
+        message: "无权限访问该视频",
+        data: { hasPermission: false },
+      });
+    }
+  } catch (error) {
+    console.error("查询权限失败:", error);
+    res.status(500).json({
+      code: 500,
+      message: error.message || "查询权限失败",
+      data: null,
+    });
   }
 });
 

@@ -255,8 +255,12 @@ async function saveOrUpdateVideoInDb(videoInfo, filePath, playUrl, userId, bilib
       [videoInfo.bvid]
     );
 
+    let videoId;
+    let isNewVideo = false;
+
     if (existingVideos.length > 0) {
       // 更新现有记录
+      videoId = existingVideos[0].id;
       await db.execute(
         `UPDATE videos SET 
          title = ?, pic = ?, view = ?, danmaku = ?, \`like\` = ?, 
@@ -268,13 +272,13 @@ async function saveOrUpdateVideoInDb(videoInfo, filePath, playUrl, userId, bilib
         [
           videoInfo.title,
           videoInfo.pic || "",
-          videoInfo.stat?.view || 0,
-          videoInfo.stat?.danmaku || 0,
-          videoInfo.stat?.like || 0,
-          videoInfo.stat?.coin || 0,
-          videoInfo.stat?.favorite || 0,
-          videoInfo.stat?.share || 0,
-          videoInfo.stat?.reply || 0,
+          videoInfo.view || 0,
+          videoInfo.danmaku || 0,
+          videoInfo.like || 0,
+          videoInfo.coin || 0,
+          videoInfo.favorite || 0,
+          videoInfo.share || 0,
+          videoInfo.reply || 0,
           videoInfo.owner?.name || "未知",
           videoInfo.owner?.face || "",
           videoInfo.pubdate || "",
@@ -285,20 +289,12 @@ async function saveOrUpdateVideoInDb(videoInfo, filePath, playUrl, userId, bilib
           playUrl,
           videoInfo.cid || "",
           videoInfo.tname || "",
-          videoInfo.stat?.now_rank || 0,
+          videoInfo.current_viewers || 0,
           videoInfo.bvid
         ]
       );
       
       console.log(`✅ 视频信息已更新: ${videoInfo.title}`);
-      return { 
-        id: existingVideos[0].id, 
-        updated: true,
-        title: videoInfo.title,
-        bvid: videoInfo.bvid,
-        filePath: filePath,
-        playUrl: playUrl
-      };
     } else {
       // 插入新记录
       const [result] = await db.execute(
@@ -331,16 +327,40 @@ async function saveOrUpdateVideoInDb(videoInfo, filePath, playUrl, userId, bilib
         ]
       );
       
+      videoId = result.insertId;
+      isNewVideo = true;
       console.log(`✅ 视频信息已保存: ${videoInfo.title}`);
-      return { 
-        id: result.insertId, 
-        updated: false,
-        title: videoInfo.title,
-        bvid: videoInfo.bvid,
-        filePath: filePath,
-        playUrl: playUrl
-      };
     }
+
+    // 检查用户视频关联关系是否已存在
+    const [existingRelation] = await db.execute(
+      "SELECT * FROM user_videos WHERE user_id = ? AND video_id = ? AND relation_type = 'processor'",
+      [userId, videoId]
+    );
+
+    if (existingRelation.length === 0) {
+      // 创建用户视频关联关系（处理者）
+      await db.execute(
+        "INSERT INTO user_videos (user_id, video_id, relation_type) VALUES (?, ?, 'processor')",
+        [userId, videoId]
+      );
+      console.log(`🔗 已创建用户视频关联关系: 用户${userId} -> 视频${videoId}`);
+    }
+
+    // 如果视频有UP主信息，尝试创建UP主关联关系
+    if (videoInfo.owner?.mid) {
+      // 这里可以扩展：如果系统中有对应的UP主用户，可以创建owner关联
+      // 暂时只记录processor关联
+    }
+
+    return { 
+      id: videoId, 
+      updated: !isNewVideo,
+      title: videoInfo.title,
+      bvid: videoInfo.bvid,
+      filePath: filePath,
+      playUrl: playUrl
+    };
   } catch (error) {
     console.error('❌ 保存视频信息到数据库失败:', error);
     throw error;
@@ -365,17 +385,33 @@ async function listAllVideos() {
 }
 
 /**
- * 获取用户的视频列表
- * @param {number} userId - 用户ID（暂时不使用，返回所有视频）
- * @returns {Promise<Array>} 用户视频列表
+ * 获取用户处理的视频列表
+ * @param {number} userId - 用户ID
+ * @returns {Promise<Array>} 视频列表
  */
 async function getUserVideos(userId) {
   try {
-    // 由于当前表结构没有user_id字段，暂时返回所有视频
+    console.log(`🔍 获取用户 ${userId} 的视频列表`);
+    
+    // 通过user_videos关联表查询用户相关的视频
     const [videos] = await db.execute(
-      `SELECT * FROM videos ORDER BY id DESC`
+      `SELECT v.*, uv.relation_type, uv.created_at as relation_created_at
+       FROM videos v 
+       INNER JOIN user_videos uv ON v.id = uv.video_id 
+       WHERE uv.user_id = ? 
+       ORDER BY uv.created_at DESC, v.id DESC`,
+      [userId]
     );
-    return videos;
+    
+    console.log(`✅ 找到 ${videos.length} 个相关视频`);
+    
+    // 为每个视频添加关系类型的中文描述
+    const videosWithRelationDesc = videos.map(video => ({
+      ...video,
+      relation_desc: getRelationTypeDesc(video.relation_type)
+    }));
+    
+    return videosWithRelationDesc;
   } catch (error) {
     console.error(`❌ 获取用户视频列表失败:`, error);
     throw error;
@@ -383,15 +419,48 @@ async function getUserVideos(userId) {
 }
 
 /**
+ * 获取关系类型的中文描述
+ * @param {string} relationType - 关系类型
+ * @returns {string} 中文描述
+ */
+function getRelationTypeDesc(relationType) {
+  const relationMap = {
+    'owner': 'UP主',
+    'processor': '处理者',
+    'downloader': '下载者'
+  };
+  return relationMap[relationType] || '未知关系';
+}
+
+/**
  * 删除视频记录和文件
  * @param {number} videoId - 视频ID
- * @param {number} userId - 用户ID（暂时不使用）
+ * @param {number} userId - 用户ID
  * @param {boolean} deleteFile - 是否删除文件
  * @returns {Promise<void>}
  */
 async function deleteVideo(videoId, userId, deleteFile = false) {
   try {
-    // 获取视频信息
+    console.log(`🗑️ 用户 ${userId} 尝试删除视频 ${videoId}`);
+    
+    // 检查用户是否有权限删除该视频（必须是处理者或下载者）
+    const [userVideoRelations] = await db.execute(
+      `SELECT uv.*, v.title, v.bvid, v.download_link 
+       FROM user_videos uv 
+       INNER JOIN videos v ON uv.video_id = v.id 
+       WHERE uv.user_id = ? AND uv.video_id = ? 
+       AND uv.relation_type IN ('processor', 'downloader')`,
+      [userId, videoId]
+    );
+    
+    if (userVideoRelations.length === 0) {
+      throw new Error('无权限删除该视频：您不是该视频的处理者或下载者');
+    }
+    
+    const videoInfo = userVideoRelations[0];
+    console.log(`✅ 权限验证通过，用户是视频的${getRelationTypeDesc(videoInfo.relation_type)}`);
+    
+    // 获取完整视频信息
     const [videos] = await db.execute(
       "SELECT * FROM videos WHERE id = ?",
       [videoId]
@@ -403,16 +472,43 @@ async function deleteVideo(videoId, userId, deleteFile = false) {
     
     const video = videos[0];
     
-    // 删除数据库记录
+    // 删除用户视频关联记录
+    await db.execute(
+      "DELETE FROM user_videos WHERE video_id = ?", 
+      [videoId]
+    );
+    console.log(`🔗 已删除用户视频关联记录`);
+    
+    // 删除视频记录
     await db.execute("DELETE FROM videos WHERE id = ?", [videoId]);
+    console.log(`📝 已删除视频数据库记录`);
     
     // 删除文件
-    if (deleteFile && video.file_path && fs.existsSync(video.file_path)) {
-      fs.unlinkSync(video.file_path);
-      console.log(`🗑️ 删除视频文件: ${video.file_path}`);
+    if (deleteFile) {
+      // 尝试从download_link推断文件路径
+      let filePath = null;
+      if (video.download_link) {
+        // 从下载链接中提取文件名
+        const fileName = video.download_link.split('/').pop();
+        filePath = path.join(VIDEO_DIR, fileName);
+      }
+      
+      // 如果有file_path字段，优先使用
+      if (video.file_path) {
+        filePath = video.file_path;
+      }
+      
+      if (filePath && fs.existsSync(filePath)) {
+        fs.unlinkSync(filePath);
+        console.log(`🗑️ 已删除视频文件: ${filePath}`);
+      } else if (filePath) {
+        console.warn(`⚠️ 视频文件不存在: ${filePath}`);
+      } else {
+        console.warn(`⚠️ 无法确定视频文件路径`);
+      }
     }
     
-    console.log(`✅ 删除视频记录: ${video.title}`);
+    console.log(`✅ 成功删除视频: ${video.title} (${video.bvid})`);
   } catch (error) {
     console.error(`❌ 删除视频失败:`, error);
     throw error;
@@ -726,20 +822,32 @@ function generateSecureDownloadLink(fileName, userId) {
  * 检查用户是否有权限下载指定文件
  * @param {string} fileName - 文件名
  * @param {string} userId - 用户ID
- * @returns {boolean} 是否有权限
+ * @returns {Promise<boolean>} 是否有权限
  */
 async function checkDownloadPermission(fileName, userId) {
   try {
+    console.log(`🔐 检查用户 ${userId} 对文件 ${fileName} 的下载权限`);
+    
     // 从文件名提取BVID
     const bvid = fileName.replace(/\.(mp4|mp3)$/, '');
     
-    // 查询数据库确认视频是否存在（由于videos表没有user_id字段，这里只检查视频是否存在）
-    const [rows] = await db.execute(
-      'SELECT id FROM videos WHERE bvid = ?',
-      [bvid]
+    // 通过user_videos关联表检查用户是否有权限访问该视频
+    const [userVideoRelations] = await db.execute(
+      `SELECT uv.relation_type, v.title, v.bvid 
+       FROM user_videos uv 
+       INNER JOIN videos v ON uv.video_id = v.id 
+       WHERE uv.user_id = ? AND v.bvid = ?`,
+      [userId, bvid]
     );
     
-    return rows.length > 0;
+    if (userVideoRelations.length > 0) {
+      const relation = userVideoRelations[0];
+      console.log(`✅ 用户有权限下载，关系类型: ${getRelationTypeDesc(relation.relation_type)}`);
+      return true;
+    }
+    
+    console.log(`❌ 用户无权限下载该视频: ${bvid}`);
+    return false;
   } catch (error) {
     console.error('检查下载权限失败:', error);
     return false;
@@ -803,6 +911,139 @@ async function handleSecureDownload(fileName, req, res) {
   }
 }
 
+/**
+ * 添加用户视频关联关系（下载者）
+ * @param {number} userId - 用户ID
+ * @param {string} bvid - 视频BVID
+ * @returns {Promise<Object>} 操作结果
+ */
+async function addVideoDownloader(userId, bvid) {
+  try {
+    console.log(`🔗 用户 ${userId} 请求添加视频 ${bvid} 的下载权限`);
+    
+    // 检查视频是否存在
+    const [videos] = await db.execute(
+      "SELECT id, title FROM videos WHERE bvid = ?",
+      [bvid]
+    );
+    
+    if (videos.length === 0) {
+      throw new Error('视频不存在');
+    }
+    
+    const video = videos[0];
+    
+    // 检查用户是否已有该视频的关联关系
+    const [existingRelations] = await db.execute(
+      "SELECT relation_type FROM user_videos WHERE user_id = ? AND video_id = ?",
+      [userId, video.id]
+    );
+    
+    if (existingRelations.length > 0) {
+      const existingType = existingRelations[0].relation_type;
+      return {
+        success: true,
+        message: `您已经是该视频的${getRelationTypeDesc(existingType)}，无需重复添加`,
+        existingRelation: existingType
+      };
+    }
+    
+    // 添加下载者关系
+    await db.execute(
+      "INSERT INTO user_videos (user_id, video_id, relation_type) VALUES (?, ?, 'downloader')",
+      [userId, video.id]
+    );
+    
+    console.log(`✅ 成功添加下载者关系: 用户${userId} -> 视频${video.title}`);
+    
+    return {
+      success: true,
+      message: '成功添加下载权限',
+      videoTitle: video.title,
+      bvid: bvid
+    };
+  } catch (error) {
+    console.error('添加视频下载者关系失败:', error);
+    throw error;
+  }
+}
+
+/**
+ * 获取所有可下载的视频列表（公开列表）
+ * @param {number} limit - 限制数量
+ * @param {number} offset - 偏移量
+ * @returns {Promise<Object>} 视频列表和总数
+ */
+async function getAvailableVideos(limit = 20, offset = 0) {
+  try {
+    // 确保参数是有效的数字
+    const parsedLimit = parseInt(limit);
+    const parsedOffset = parseInt(offset);
+    const validLimit = Math.max(1, Math.min(100, isNaN(parsedLimit) ? 20 : parsedLimit));
+    const validOffset = Math.max(0, isNaN(parsedOffset) ? 0 : parsedOffset);
+    
+    console.log(`📋 获取可下载视频列表，限制: ${validLimit}, 偏移: ${validOffset}`);
+    
+    // 获取总数
+    const [countResult] = await db.execute(
+      "SELECT COUNT(*) as total FROM videos"
+    );
+    const total = countResult[0].total;
+    
+    // 获取视频列表（简化查询）
+    // 将参数转换为字符串以解决MySQL 8.0.22的已知问题
+    const limitStr = String(validLimit);
+    const offsetStr = String(validOffset);
+    
+    console.log('SQL参数调试信息:');
+    console.log('limitStr:', limitStr, 'type:', typeof limitStr);
+    console.log('offsetStr:', offsetStr, 'type:', typeof offsetStr);
+    
+    const [videos] = await db.execute(
+      `SELECT * FROM videos 
+       ORDER BY id DESC 
+       LIMIT ? OFFSET ?`,
+      [limitStr, offsetStr]
+    );
+    
+    // 为每个视频获取用户数量和处理者信息
+    for (let video of videos) {
+      // 获取用户数量
+      const [userCountResult] = await db.execute(
+        'SELECT COUNT(*) as count FROM user_videos WHERE video_id = ?',
+        [video.id]
+      );
+      video.user_count = userCountResult[0].count;
+      
+      // 获取处理者列表
+      const [processorsResult] = await db.execute(
+        `SELECT DISTINCT u.username 
+         FROM user_videos uv 
+         INNER JOIN user u ON uv.user_id = u.id 
+         WHERE uv.video_id = ? AND uv.relation_type = 'processor'`,
+        [video.id]
+      );
+      video.processors = processorsResult.map(p => p.username).join(',');
+    }
+    
+    console.log(`✅ 找到 ${videos.length} 个可下载视频`);
+    
+    return {
+      videos: videos.map(video => ({
+        ...video,
+        processors: video.processors ? video.processors.split(',').slice(0, 3) : []
+      })),
+      total,
+      limit: validLimit,
+      offset: validOffset,
+      hasMore: validOffset + validLimit < total
+    };
+  } catch (error) {
+    console.error('获取可下载视频列表失败:', error);
+    throw error;
+  }
+}
+
 module.exports = {
   parseVideoInfo,
   downloadFile,
@@ -819,5 +1060,7 @@ module.exports = {
   verifyDownloadToken,
   generateSecureDownloadLink,
   checkDownloadPermission,
-  handleSecureDownload
+  handleSecureDownload,
+  addVideoDownloader,
+  getAvailableVideos
 };
