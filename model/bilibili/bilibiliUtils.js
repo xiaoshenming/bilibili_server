@@ -278,32 +278,84 @@ async function handleSuccessfulLogin(sessionId, userId, loginUrl) {
  */
 async function getBilibiliUserInfo(dedeuserid, cookieString) {
   try {
-    const response = await axios.get(
-      `https://api.bilibili.com/x/space/acc/info?mid=${dedeuserid}`,
-      {
-        headers: {
-          ...BILIBILI_HEADERS,
-          'Cookie': cookieString
-        }
-      }
-    );
+    console.log(`🔍 开始获取B站用户信息: dedeuserid=${dedeuserid}`);
+    console.log(`🍪 使用的Cookie: ${cookieString}`);
     
-    if (response.data && response.data.code === 0) {
-      const data = response.data.data;
-      return {
-        nickname: data.name || '未知用户',
-        avatar: data.face || ''
-      };
-    } else {
-      return {
-        nickname: '未知用户',
-        avatar: ''
-      };
+    // 方法1: 尝试使用用户空间信息API
+    try {
+      const response = await axios.get(
+        `https://api.bilibili.com/x/space/acc/info?mid=${dedeuserid}`,
+        {
+          headers: {
+            ...BILIBILI_HEADERS,
+            'Cookie': cookieString,
+            'Referer': 'https://space.bilibili.com/',
+            'Origin': 'https://space.bilibili.com'
+          },
+          timeout: 10000
+        }
+      );
+      
+      console.log(`📡 API响应状态: ${response.status}`);
+      console.log(`📡 API响应数据:`, response.data);
+      
+      if (response.data && response.data.code === 0 && response.data.data) {
+        const data = response.data.data;
+        const userInfo = {
+          nickname: data.name || '未知用户',
+          avatar: data.face || ''
+        };
+        console.log(`✅ 成功获取用户信息:`, userInfo);
+        return userInfo;
+      } else {
+        console.log(`⚠️ API返回错误: code=${response.data?.code}, message=${response.data?.message}`);
+      }
+    } catch (apiError) {
+      console.log(`❌ 用户空间API请求失败:`, apiError.message);
     }
+    
+    // 方法2: 尝试使用导航栏用户信息API
+    try {
+      console.log(`🔄 尝试使用导航栏API获取用户信息`);
+      const navResponse = await axios.get(
+        'https://api.bilibili.com/x/web-interface/nav',
+        {
+          headers: {
+            ...BILIBILI_HEADERS,
+            'Cookie': cookieString,
+            'Referer': 'https://www.bilibili.com/',
+            'Origin': 'https://www.bilibili.com'
+          },
+          timeout: 10000
+        }
+      );
+      
+      console.log(`📡 导航API响应:`, navResponse.data);
+      
+      if (navResponse.data && navResponse.data.code === 0 && navResponse.data.data) {
+        const data = navResponse.data.data;
+        const userInfo = {
+          nickname: data.uname || '未知用户',
+          avatar: data.face || ''
+        };
+        console.log(`✅ 通过导航API获取用户信息:`, userInfo);
+        return userInfo;
+      }
+    } catch (navError) {
+      console.log(`❌ 导航API请求失败:`, navError.message);
+    }
+    
+    // 方法3: 使用dedeuserid作为默认用户名
+    console.log(`⚠️ 所有API都失败，使用dedeuserid作为用户名`);
+    return {
+      nickname: `用户${dedeuserid}`,
+      avatar: ''
+    };
+    
   } catch (error) {
     console.error('获取B站用户信息失败:', error);
     return {
-      nickname: '未知用户',
+      nickname: `用户${dedeuserid || '未知'}`,
       avatar: ''
     };
   }

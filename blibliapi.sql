@@ -1,8 +1,3 @@
--- 创建名为blibliapi的数据库（如果不存在）
-CREATE DATABASE IF NOT EXISTS blibliapi;
-
--- 选择blibliapi数据库
-USE blibliapi;
 /*
  Navicat Premium Dump SQL
 
@@ -16,7 +11,7 @@ USE blibliapi;
  Target Server Version : 80036 (8.0.36)
  File Encoding         : 65001
 
- Date: 31/05/2025 21:10:04
+ Date: 01/06/2025 00:37:14
 */
 
 SET NAMES utf8mb4;
@@ -44,12 +39,12 @@ CREATE TABLE `bilibili_accounts`  (
   INDEX `idx_user_id`(`user_id` ASC) USING BTREE,
   INDEX `idx_dedeuserid`(`dedeuserid` ASC) USING BTREE,
   INDEX `idx_is_active`(`is_active` ASC) USING BTREE
-) ENGINE = InnoDB AUTO_INCREMENT = 2 CHARACTER SET = utf8mb4 COLLATE = utf8mb4_unicode_ci COMMENT = 'B站账号登录信息表' ROW_FORMAT = DYNAMIC;
+) ENGINE = InnoDB AUTO_INCREMENT = 9 CHARACTER SET = utf8mb4 COLLATE = utf8mb4_unicode_ci COMMENT = 'B站账号登录信息表' ROW_FORMAT = DYNAMIC;
 
 -- ----------------------------
 -- Records of bilibili_accounts
 -- ----------------------------
-INSERT INTO `bilibili_accounts` VALUES (1, 8, '424572043', '203b1b383009ebe5a49f76ecd143acad', 'DedeUserID=424572043; bili_jct=203b1b383009ebe5a49f76ecd143acad; SESSDATA=0bb77fa8,1764225078,be381*52CjCq18rDvk7nT_T_UKIW8PwzpdOae1TFQNf8aNi7hFU7Jusd0cVCgOvVbP9N-ymFTBYSVjFWdXl0OEdva0FjSFBJOXR5THNSemwtZzZGXy1NSGY3Z0lTZ1NKNGN5M1BhOUQtOG1IalRDUUVCMHd0cGltN01IN2gzdmxIV1ViME9naE1hVkdmckRRIIEC; DedeUserID__ckMd5=4759cf6b6b604ad0;', '未知用户', '', 1, '2025-05-31 06:31:18', NULL, '2025-05-31 06:31:18', '2025-05-31 06:31:18');
+INSERT INTO `bilibili_accounts` VALUES (8, 8, '424572043', 'd792c619a142a7355230185154c04f93', 'DedeUserID=424572043; bili_jct=d792c619a142a7355230185154c04f93; SESSDATA=a2adc98f,1764252534,a9e45*52CjDtB3lfqm2nxlNid4uiaX5ChS8Ge7VOSVsPAiEuM6wypnV9XjdVEC14XCae7e7H_jQSVk9nREs0TG5KdjNFcjI1VnJZNnYtYjZ0Nm1vZzZmWkh3MnB2OEZQM1BNZERKMXoweWFNNU5RUF9oN0YwN2hJOTg5Sk0wV2JUZHV6eUx6ZzNrTkNrN2pnIIEC; DedeUserID__ckMd5=4759cf6b6b604ad0;', 'Smal日月', 'https://i1.hdslb.com/bfs/face/5d3b08e9797122e0287348432b1a0334ba33f119.jpg', 1, '2025-05-31 14:08:54', NULL, '2025-05-31 14:08:54', '2025-05-31 14:08:54');
 
 -- ----------------------------
 -- Table structure for loginverification
@@ -140,7 +135,7 @@ CREATE TABLE `user_videos`  (
   INDEX `idx_user_id`(`user_id` ASC) USING BTREE,
   INDEX `idx_video_id`(`video_id` ASC) USING BTREE,
   INDEX `idx_relation_type`(`relation_type` ASC) USING BTREE
-) ENGINE = InnoDB CHARACTER SET = utf8mb4 COLLATE = utf8mb4_unicode_ci COMMENT = '用户视频关联表' ROW_FORMAT = Dynamic;
+) ENGINE = InnoDB CHARACTER SET = utf8mb4 COLLATE = utf8mb4_unicode_ci COMMENT = '用户视频关联表' ROW_FORMAT = DYNAMIC;
 
 -- ----------------------------
 -- Records of user_videos
@@ -175,7 +170,12 @@ CREATE TABLE `videos`  (
   `cid` varchar(255) CHARACTER SET utf8mb3 COLLATE utf8mb3_unicode_ci NULL DEFAULT NULL COMMENT 'cid',
   PRIMARY KEY (`id`) USING BTREE,
   UNIQUE INDEX `video_id`(`bvid`) USING BTREE
-) ENGINE = MyISAM AUTO_INCREMENT = 98 CHARACTER SET = utf8mb3 COLLATE = utf8mb3_unicode_ci ROW_FORMAT = DYNAMIC;
+) ENGINE = MyISAM AUTO_INCREMENT = 100 CHARACTER SET = utf8mb3 COLLATE = utf8mb3_unicode_ci ROW_FORMAT = DYNAMIC;
 
+-- ----------------------------
+-- Records of videos
+-- ----------------------------
+INSERT INTO `videos` VALUES (98, 'BV1drjKziEhs', '修仙界血脉为尊，什么叫你是修仙界孟德尔？', 'http://i0.hdslb.com/bfs/archive/8154d992104ad3460bc76aa85deb84ec4ee0d15e.jpg', '710295', '288', '67987', '669', '7488', '2189', '0', '80', 'http://10.23.55.31:11111/api/video/download/BV1drjKziEhs.mp4', '1748138544', '114565987704303', '配音', '-', '103', '笔给你你来写_', 'https://i0.hdslb.com/bfs/face/8e8a57daeb8ee0b50e6fa4e66c4f18f849fc601c.jpg', '1185', '30137386126');
+INSERT INTO `videos` VALUES (99, 'BV1zm2NYuETu', '别的小说老祖VS遮天老祖', 'http://i1.hdslb.com/bfs/archive/91b3a2931b46608982ed345325336da870e64164.jpg', '977222', '76', '24547', '131', '2909', '307', '0', '80', 'http://10.23.55.31:11111/api/video/download/BV1zm2NYuETu.mp4', '1728485974', '113278051224644', '综合', '', '29', '狗头小李27', 'https://i1.hdslb.com/bfs/face/2b5772c80e90056a4472e99a8baaa4c01d52e38c.jpg', '1770', '26218203191');
 
 SET FOREIGN_KEY_CHECKS = 1;
