@@ -2,3 +2,6 @@ node_modules/
 download/
 downloads/
 /videos/
+.env
+.env.*
+*.log
