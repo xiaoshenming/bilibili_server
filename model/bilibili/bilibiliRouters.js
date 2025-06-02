@@ -69,6 +69,55 @@ router.get("/login-status/:sessionId", authorize(["1", "2", "3"]), async (req, r
 });
 
 /**
+ * 获取哔哩哔哩登录鉴权信息（专为鸿蒙端设计）
+ * GET /api/bilibili/auth-info
+ * 需要用户登录
+ * 返回当前用户的活跃B站账号的完整鉴权信息
+ */
+router.get("/auth-info", authorize(["1", "2", "3", "4"]), async (req, res) => {
+  try {
+    const userId = req.user.uid || req.user.id;
+    
+    // 获取用户的活跃B站账号
+    const activeAccount = await bilibiliUtils.getActiveBilibiliAccount(userId);
+    
+    if (!activeAccount) {
+      return res.json({
+        code: 404,
+        message: "未找到活跃的哔哩哔哩账号",
+        data: null
+      });
+    }
+    
+    // 返回鸿蒙端需要的鉴权信息
+    const authInfo = {
+      dedeuserid: activeAccount.dedeuserid,
+      bili_jct: activeAccount.bili_jct,
+      cookie_string: activeAccount.cookie_string,
+      nickname: activeAccount.nickname,
+      avatar: activeAccount.avatar,
+      login_time: activeAccount.login_time,
+      expire_time: activeAccount.expire_time,
+      // 解析Cookie为对象格式，方便鸿蒙端使用
+      cookies: parseCookieString(activeAccount.cookie_string)
+    };
+    
+    res.json({
+      code: 200,
+      message: "获取鉴权信息成功",
+      data: authInfo
+    });
+  } catch (error) {
+    console.error("获取B站鉴权信息失败:", error);
+    res.status(500).json({
+      code: 500,
+      message: error.message || "获取鉴权信息失败",
+      data: null
+    });
+  }
+});
+
+/**
  * 获取用户的B站账号列表
  * GET /api/bilibili/accounts
  * 需要用户登录
@@ -487,6 +536,25 @@ async function getPlayInfo(bvid, cid, cookieString) {
     console.error('获取播放信息失败:', error);
     return null;
   }
+}
+
+/**
+ * 解析Cookie字符串为对象格式
+ * @param {string} cookieString - Cookie字符串
+ * @returns {Object} Cookie对象
+ */
+function parseCookieString(cookieString) {
+  if (!cookieString) return {};
+  
+  const cookies = {};
+  cookieString.split(';').forEach(cookie => {
+    const parts = cookie.trim().split('=');
+    if (parts.length === 2) {
+      cookies[parts[0]] = parts[1];
+    }
+  });
+  
+  return cookies;
 }
 
 module.exports = router;
