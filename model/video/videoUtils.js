@@ -9,6 +9,8 @@ const jwt = require("jsonwebtoken");
 const crypto = require("crypto");
 const db = require("../../config/db").promise();
 const bilibiliUtils = require("../bilibili/bilibiliUtils");
+const { Worker } = require("worker_threads");
+const EventEmitter = require("events");
 
 // 配置路径
 const DOWNLOAD_DIR = path.join(__dirname, "../../downloads"); // 临时下载目录
@@ -25,6 +27,189 @@ if (!fs.existsSync(VIDEO_DIR)) {
   fs.mkdirSync(VIDEO_DIR, { recursive: true });
   console.log(`📁 创建视频存储目录: ${VIDEO_DIR}`);
 }
+
+// 视频合并队列管理系统
+class VideoMergeQueue extends EventEmitter {
+  constructor(maxConcurrent = 2) {
+    super();
+    this.maxConcurrent = maxConcurrent; // 最大并发数
+    this.currentTasks = 0; // 当前运行任务数
+    this.queue = []; // 任务队列
+    this.taskStatus = new Map(); // 任务状态存储
+  }
+
+  // 添加合并任务到队列
+  addTask(taskId, videoPath, audioPath, outputPath, progressCallback) {
+    return new Promise((resolve, reject) => {
+      const task = {
+        id: taskId,
+        videoPath,
+        audioPath,
+        outputPath,
+        progressCallback,
+        resolve,
+        reject,
+        status: 'queued',
+        createdAt: Date.now()
+      };
+
+      this.queue.push(task);
+      this.taskStatus.set(taskId, {
+        status: 'queued',
+        progress: 0,
+        createdAt: Date.now()
+      });
+
+      console.log(`📋 任务 ${taskId} 已加入队列，当前队列长度: ${this.queue.length}`);
+      this.processQueue();
+    });
+  }
+
+  // 处理队列
+  async processQueue() {
+    if (this.currentTasks >= this.maxConcurrent || this.queue.length === 0) {
+      return;
+    }
+
+    const task = this.queue.shift();
+    this.currentTasks++;
+    
+    task.status = 'processing';
+    this.taskStatus.set(task.id, {
+      status: 'processing',
+      progress: 0,
+      startedAt: Date.now()
+    });
+
+    console.log(`🔧 开始处理任务 ${task.id}，当前并发数: ${this.currentTasks}`);
+
+    try {
+      await this.executeMergeTask(task);
+      task.resolve();
+      this.taskStatus.set(task.id, {
+        status: 'completed',
+        progress: 100,
+        completedAt: Date.now()
+      });
+      console.log(`✅ 任务 ${task.id} 完成`);
+    } catch (error) {
+      task.reject(error);
+      this.taskStatus.set(task.id, {
+        status: 'failed',
+        error: error.message,
+        failedAt: Date.now()
+      });
+      console.error(`❌ 任务 ${task.id} 失败:`, error.message);
+    } finally {
+      this.currentTasks--;
+      // 清理过期的任务状态（保留1小时）
+      this.cleanupExpiredTasks();
+      // 继续处理队列中的下一个任务
+      this.processQueue();
+    }
+  }
+
+  // 执行合并任务
+  executeMergeTask(task) {
+    return new Promise((resolve, reject) => {
+      const { videoPath, audioPath, outputPath, progressCallback, id } = task;
+      
+      const ffmpeg = spawn(FFMPEG_PATH, [
+        "-i", videoPath,
+        "-i", audioPath,
+        "-c:v", "copy",
+        "-c:a", "aac",
+        "-strict", "experimental",
+        "-y", // 覆盖输出文件
+        outputPath,
+      ]);
+
+      let duration = null;
+      
+      ffmpeg.stderr.on("data", (data) => {
+        const output = data.toString();
+        
+        // 提取总时长
+        if (!duration) {
+          const durationMatch = output.match(/Duration: (\d{2}):(\d{2}):(\d{2})\.(\d{2})/);
+          if (durationMatch) {
+            const hours = parseInt(durationMatch[1]);
+            const minutes = parseInt(durationMatch[2]);
+            const seconds = parseInt(durationMatch[3]);
+            duration = hours * 3600 + minutes * 60 + seconds;
+          }
+        }
+        
+        // 提取当前进度
+        if (duration) {
+          const timeMatch = output.match(/time=(\d{2}):(\d{2}):(\d{2})\.(\d{2})/);
+          if (timeMatch) {
+            const hours = parseInt(timeMatch[1]);
+            const minutes = parseInt(timeMatch[2]);
+            const seconds = parseInt(timeMatch[3]);
+            const currentTime = hours * 3600 + minutes * 60 + seconds;
+            const progress = (currentTime / duration * 100).toFixed(2);
+            
+            // 更新任务状态
+            this.taskStatus.set(id, {
+              status: 'processing',
+              progress: parseFloat(progress),
+              currentTime,
+              duration,
+              updatedAt: Date.now()
+            });
+            
+            // 调用进度回调
+            if (progressCallback) {
+              progressCallback(progress, currentTime, duration);
+            }
+          }
+        }
+      });
+
+      ffmpeg.on("close", (code) => {
+        if (code === 0) {
+          resolve();
+        } else {
+          reject(new Error(`FFmpeg 合并失败，退出代码: ${code}`));
+        }
+      });
+
+      ffmpeg.on("error", (error) => {
+        reject(error);
+      });
+    });
+  }
+
+  // 获取任务状态
+  getTaskStatus(taskId) {
+    return this.taskStatus.get(taskId) || { status: 'not_found' };
+  }
+
+  // 获取队列状态
+  getQueueStatus() {
+    return {
+      queueLength: this.queue.length,
+      currentTasks: this.currentTasks,
+      maxConcurrent: this.maxConcurrent,
+      totalTasks: this.taskStatus.size
+    };
+  }
+
+  // 清理过期任务状态
+  cleanupExpiredTasks() {
+    const oneHourAgo = Date.now() - (60 * 60 * 1000);
+    for (const [taskId, status] of this.taskStatus.entries()) {
+      const lastUpdate = status.completedAt || status.failedAt || status.updatedAt || status.createdAt;
+      if (lastUpdate < oneHourAgo && ['completed', 'failed'].includes(status.status)) {
+        this.taskStatus.delete(taskId);
+      }
+    }
+  }
+}
+
+// 创建全局队列实例
+const videoMergeQueue = new VideoMergeQueue(2); // 最大并发数为2
 
 // 视频质量映射
 const QUALITY_MAP = {
@@ -168,7 +353,7 @@ async function downloadFile(url, filePath, cookieString, progressCallback) {
 }
 
 /**
- * 使用 FFmpeg 合并视频和音频（支持进度回调）
+ * 使用 FFmpeg 合并视频和音频（支持进度回调）- 队列版本
  * @param {string} videoPath - 视频文件路径
  * @param {string} audioPath - 音频文件路径
  * @param {string} outputPath - 输出文件路径
@@ -176,8 +361,43 @@ async function downloadFile(url, filePath, cookieString, progressCallback) {
  * @returns {Promise<void>}
  */
 function mergeVideoAndAudio(videoPath, audioPath, outputPath, progressCallback) {
+  // 生成唯一任务ID
+  const taskId = `merge_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+  
+  console.log(`🔧 将视频合并任务加入队列: ${path.basename(outputPath)} (任务ID: ${taskId})`);
+  
+  // 将任务添加到队列中
+  return videoMergeQueue.addTask(taskId, videoPath, audioPath, outputPath, progressCallback);
+}
+
+/**
+ * 获取合并任务状态
+ * @param {string} taskId - 任务ID
+ * @returns {Object} 任务状态
+ */
+function getMergeTaskStatus(taskId) {
+  return videoMergeQueue.getTaskStatus(taskId);
+}
+
+/**
+ * 获取合并队列状态
+ * @returns {Object} 队列状态
+ */
+function getMergeQueueStatus() {
+  return videoMergeQueue.getQueueStatus();
+}
+
+/**
+ * 直接执行合并（不使用队列，用于紧急情况）
+ * @param {string} videoPath - 视频文件路径
+ * @param {string} audioPath - 音频文件路径
+ * @param {string} outputPath - 输出文件路径
+ * @param {Function} progressCallback - 进度回调函数
+ * @returns {Promise<void>}
+ */
+function mergeVideoAndAudioDirect(videoPath, audioPath, outputPath, progressCallback) {
   return new Promise((resolve, reject) => {
-    console.log(`🔧 开始合并视频和音频: ${path.basename(outputPath)}`);
+    console.log(`🔧 直接合并视频和音频: ${path.basename(outputPath)}`);
 
     const ffmpeg = spawn(FFMPEG_PATH, [
       "-i", videoPath,
@@ -1157,6 +1377,9 @@ module.exports = {
   parseVideoInfo,
   downloadFile,
   mergeVideoAndAudio,
+  mergeVideoAndAudioDirect,
+  getMergeTaskStatus,
+  getMergeQueueStatus,
   saveOrUpdateVideoInDb,
   listAllVideos,
   getUserVideos,
@@ -1173,5 +1396,7 @@ module.exports = {
   addVideoDownloader,
   getAvailableVideos,
   checkDailyDownloadLimit,
-  incrementDailyDownloadCount
+  incrementDailyDownloadCount,
+  // 队列管理相关
+  videoMergeQueue
 };
