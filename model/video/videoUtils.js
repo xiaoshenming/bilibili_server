@@ -16,6 +16,7 @@ const EventEmitter = require("events");
 const DOWNLOAD_DIR = path.join(__dirname, "../../downloads"); // 临时下载目录
 const VIDEO_DIR = path.join(__dirname, "../../videos"); // 最终视频存储目录
 const FFMPEG_PATH = "ffmpeg"; // FFmpeg 可执行文件路径，确保已安装并在 PATH 中
+const FFPROBE_PATH = "ffprobe"; // FFprobe 可执行文件路径，用于检测视频信息
 
 // 确保目录存在
 if (!fs.existsSync(DOWNLOAD_DIR)) {
@@ -110,75 +111,140 @@ class VideoMergeQueue extends EventEmitter {
   }
 
   // 执行合并任务
-  executeMergeTask(task) {
-    return new Promise((resolve, reject) => {
+  async executeMergeTask(task) {
+    return new Promise(async (resolve, reject) => {
       const { videoPath, audioPath, outputPath, progressCallback, id } = task;
       
-      const ffmpeg = spawn(FFMPEG_PATH, [
-        "-i", videoPath,
-        "-i", audioPath,
-        "-c:v", "copy",
-        "-c:a", "aac",
-        "-strict", "experimental",
-        "-y", // 覆盖输出文件
-        outputPath,
-      ]);
-
-      let duration = null;
-      
-      ffmpeg.stderr.on("data", (data) => {
-        const output = data.toString();
+      // 设置FFmpeg事件处理器的通用函数
+      const setupFFmpegHandlers = (ffmpegProcess) => {
+        let duration = null;
         
-        // 提取总时长
-        if (!duration) {
-          const durationMatch = output.match(/Duration: (\d{2}):(\d{2}):(\d{2})\.(\d{2})/);
-          if (durationMatch) {
-            const hours = parseInt(durationMatch[1]);
-            const minutes = parseInt(durationMatch[2]);
-            const seconds = parseInt(durationMatch[3]);
-            duration = hours * 3600 + minutes * 60 + seconds;
-          }
-        }
-        
-        // 提取当前进度
-        if (duration) {
-          const timeMatch = output.match(/time=(\d{2}):(\d{2}):(\d{2})\.(\d{2})/);
-          if (timeMatch) {
-            const hours = parseInt(timeMatch[1]);
-            const minutes = parseInt(timeMatch[2]);
-            const seconds = parseInt(timeMatch[3]);
-            const currentTime = hours * 3600 + minutes * 60 + seconds;
-            const progress = (currentTime / duration * 100).toFixed(2);
-            
-            // 更新任务状态
-            this.taskStatus.set(id, {
-              status: 'processing',
-              progress: parseFloat(progress),
-              currentTime,
-              duration,
-              updatedAt: Date.now()
-            });
-            
-            // 调用进度回调
-            if (progressCallback) {
-              progressCallback(progress, currentTime, duration);
+        ffmpegProcess.stderr.on("data", (data) => {
+          const output = data.toString();
+          
+          // 提取总时长
+          if (!duration) {
+            const durationMatch = output.match(/Duration: (\d{2}):(\d{2}):(\d{2})\.(\d{2})/);
+            if (durationMatch) {
+              const hours = parseInt(durationMatch[1]);
+              const minutes = parseInt(durationMatch[2]);
+              const seconds = parseInt(durationMatch[3]);
+              duration = hours * 3600 + minutes * 60 + seconds;
             }
           }
-        }
-      });
+          
+          // 提取当前进度
+          if (duration) {
+            const timeMatch = output.match(/time=(\d{2}):(\d{2}):(\d{2})\.(\d{2})/);
+            if (timeMatch) {
+              const hours = parseInt(timeMatch[1]);
+              const minutes = parseInt(timeMatch[2]);
+              const seconds = parseInt(timeMatch[3]);
+              const currentTime = hours * 3600 + minutes * 60 + seconds;
+              const progress = (currentTime / duration * 100).toFixed(2);
+              
+              // 更新任务状态
+              this.taskStatus.set(id, {
+                status: 'processing',
+                progress: parseFloat(progress),
+                currentTime,
+                duration,
+                updatedAt: Date.now()
+              });
+              
+              // 调用进度回调
+              if (progressCallback) {
+                progressCallback(progress, currentTime, duration);
+              }
+            }
+          }
+        });
 
-      ffmpeg.on("close", (code) => {
-        if (code === 0) {
-          resolve();
+        ffmpegProcess.on("close", (code) => {
+          if (code === 0) {
+            resolve();
+          } else {
+            reject(new Error(`FFmpeg 合并失败，退出代码: ${code}`));
+          }
+        });
+
+        ffmpegProcess.on("error", (error) => {
+          reject(error);
+        });
+      };
+      
+      try {
+        // 检测视频编码格式
+        console.log(`🔍 正在检测视频编码格式: ${videoPath}`);
+        const codecInfo = await detectVideoCodec(videoPath);
+        
+        // 根据编码格式和鸿蒙兼容性选择处理方式
+        let videoCodecArgs;
+        if (codecInfo.isHarmonyCompatible) {
+          // H.264格式，鸿蒙兼容，直接复制
+          console.log(`✅ 检测到H.264编码，使用快速复制模式`);
+          videoCodecArgs = ["-c:v", "copy"];
         } else {
-          reject(new Error(`FFmpeg 合并失败，退出代码: ${code}`));
+          // 非H.264格式（如H.265），需要转码为H.264以兼容鸿蒙
+          console.log(`⚠️ 检测到${codecInfo.codec_name}编码，转码为H.264以兼容鸿蒙系统`);
+          videoCodecArgs = [
+            "-c:v", "libx264",
+            "-preset", "fast",
+            "-crf", "23",
+            "-profile:v", "high",
+            "-level", "4.1"
+          ];
         }
-      });
-
-      ffmpeg.on("error", (error) => {
-        reject(error);
-      });
-    });
+        
+        const ffmpegArgs = [
+          "-i", videoPath,
+          "-i", audioPath,
+          ...videoCodecArgs,
+          "-c:a", "aac",
+          "-b:a", "128k",
+          "-movflags", "+faststart", // 优化网络播放
+          "-strict", "experimental",
+          "-y", // 覆盖输出文件
+          outputPath,
+        ];
+        
+        console.log(`🎬 开始合并视频，FFmpeg参数:`, ffmpegArgs.join(' '));
+        const ffmpeg = spawn(FFMPEG_PATH, ffmpegArgs);
+        
+        // 存储编码信息到任务状态中
+        const taskStatus = this.taskStatus.get(id);
+        if (taskStatus) {
+          taskStatus.codecInfo = codecInfo;
+          taskStatus.processingMode = codecInfo.isHarmonyCompatible ? 'copy' : 'transcode';
+        }
+        
+        // 为正常流程的ffmpeg设置进度处理器
+        setupFFmpegHandlers(ffmpeg);
+      } catch (codecError) {
+         console.error(`❌ 视频编码检测失败，使用默认H.264转码模式:`, codecError.message);
+         // 检测失败时，使用安全的H.264转码模式
+         const ffmpeg = spawn(FFMPEG_PATH, [
+           "-i", videoPath,
+           "-i", audioPath,
+           "-c:v", "libx264",
+           "-preset", "fast",
+           "-crf", "23",
+           "-c:a", "aac",
+           "-b:a", "128k",
+           "-movflags", "+faststart",
+           "-y",
+           outputPath,
+         ]);
+         
+         // 为错误处理分支也添加进度处理
+         setupFFmpegHandlers(ffmpeg);
+       }
+       
+       // 为正常流程的ffmpeg也设置处理器
+       if (typeof ffmpeg !== 'undefined') {
+         setupFFmpegHandlers(ffmpeg);
+       }
+     });
   }
 
   // 获取任务状态
@@ -210,6 +276,77 @@ class VideoMergeQueue extends EventEmitter {
 
 // 创建全局队列实例
 const videoMergeQueue = new VideoMergeQueue(2); // 最大并发数为2
+
+/**
+ * 检测视频编码格式
+ * @param {string} videoPath - 视频文件路径
+ * @returns {Promise<Object>} 视频编码信息
+ */
+function detectVideoCodec(videoPath) {
+  return new Promise((resolve, reject) => {
+    const ffprobe = spawn(FFPROBE_PATH, [
+      "-v", "quiet",
+      "-print_format", "json",
+      "-show_streams",
+      "-select_streams", "v:0", // 只选择第一个视频流
+      videoPath
+    ]);
+
+    let output = "";
+    let errorOutput = "";
+
+    ffprobe.stdout.on("data", (data) => {
+      output += data.toString();
+    });
+
+    ffprobe.stderr.on("data", (data) => {
+      errorOutput += data.toString();
+    });
+
+    ffprobe.on("close", (code) => {
+      if (code !== 0) {
+        console.error(`❌ FFprobe 检测失败:`, errorOutput);
+        reject(new Error(`FFprobe 检测失败: ${errorOutput}`));
+        return;
+      }
+
+      try {
+        const result = JSON.parse(output);
+        const videoStream = result.streams[0];
+        
+        if (!videoStream) {
+          reject(new Error("未找到视频流"));
+          return;
+        }
+
+        const codecInfo = {
+          codec_name: videoStream.codec_name,
+          codec_long_name: videoStream.codec_long_name,
+          profile: videoStream.profile,
+          level: videoStream.level,
+          width: videoStream.width,
+          height: videoStream.height,
+          bit_rate: videoStream.bit_rate,
+          duration: videoStream.duration,
+          isH264: videoStream.codec_name === "h264",
+          isH265: videoStream.codec_name === "hevc" || videoStream.codec_name === "h265",
+          isHarmonyCompatible: videoStream.codec_name === "h264" // 鸿蒙系统兼容性
+        };
+
+        console.log(`🔍 视频编码检测结果: ${codecInfo.codec_name} (${codecInfo.codec_long_name})`);
+        resolve(codecInfo);
+      } catch (parseError) {
+        console.error(`❌ 解析FFprobe输出失败:`, parseError.message);
+        reject(new Error(`解析FFprobe输出失败: ${parseError.message}`));
+      }
+    });
+
+    ffprobe.on("error", (error) => {
+      console.error(`❌ FFprobe 启动失败:`, error.message);
+      reject(new Error(`FFprobe 启动失败: ${error.message}`));
+    });
+  });
+}
 
 // 视频质量映射
 const QUALITY_MAP = {
@@ -1397,6 +1534,7 @@ module.exports = {
   getAvailableVideos,
   checkDailyDownloadLimit,
   incrementDailyDownloadCount,
+  detectVideoCodec,
   // 队列管理相关
   videoMergeQueue
 };
